@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 from .config import RunConfig
-from .storage import read_json
 from .runner import run_workflow
+from .storage import read_json
 
 
 def parser():

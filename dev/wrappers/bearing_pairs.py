@@ -4,7 +4,6 @@ from pathlib import Path
 
 from .bearing_baseline import BearingBaseline, digest, read_rows
 
-
 REPLAY_DIR = "data/bearing_rul_replay"
 PROTOCOL = "bearing_paired_condition_replay"
 

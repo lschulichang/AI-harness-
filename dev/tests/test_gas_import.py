@@ -5,10 +5,9 @@ import json
 
 import numpy as np
 import pytest
-
 from harness_core.config import project_root
-from harness_core.gas_import import convert, detect, draft_mapping, mapped_rows
 from harness_core.gas_data import open_gas_batches
+from harness_core.gas_import import convert, detect, draft_mapping, mapped_rows
 from harness_core.gas_runner import replay_batches
 
 

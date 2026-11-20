@@ -4,7 +4,7 @@ import time
 import numpy as np
 from scipy.spatial.distance import jensenshannon
 
-from .feature_drift import _psi, detect_features
+from .feature_drift import detect_features
 
 
 def label_distribution(reference, current, classes):

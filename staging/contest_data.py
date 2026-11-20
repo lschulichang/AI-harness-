@@ -3,16 +3,14 @@
 import gzip
 import json
 import math
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import numpy as np
-
 from baseline.gas.baselines.data import flatten
 from harness_core.storage import atomic_json, read_json
 from wrappers.bearing_baseline import BearingBaseline
 from wrappers.cmapss_baseline import CmapssBaseline
-
 
 ROOT = Path(__file__).resolve().parent
 BUNDLES = {

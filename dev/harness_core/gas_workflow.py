@@ -9,19 +9,21 @@ from statistics import mean
 from zipfile import BadZipFile
 
 import numpy as np
-
 from baseline.gas.baselines.model import Model, checkpoint_digest
 
 from .gas_data import evaluate, evaluate_samples, gas_samples
 from .gas_drift import detect, label_distribution
-from .runner import training_window
 from .gas_metrics import evaluate as trainer_evaluate
 from .gas_policy import (
-    GasTrainer, TRAINING_ACTIONS, WINDOW_DRIFT_BATCHES,
-    WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
+    TRAINING_ACTIONS,
+    WINDOW_DRIFT_BATCHES,
+    WINDOW_TRAINER_CONFIG,
+    WINDOW_VALIDATION_BATCHES,
+    GasTrainer,
 )
-from .resource_monitor import BatchMeter
 from .portability import resolve_model_path
+from .resource_monitor import BatchMeter
+from .runner import training_window
 from .storage import atomic_json, read_json
 
 

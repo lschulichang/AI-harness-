@@ -3,15 +3,14 @@ import math
 import os
 import sys
 import tempfile
-from pathlib import Path
 import time
+from pathlib import Path
 
 import numpy as np
+from baseline.gas.baselines.model import Model, checkpoint_digest
 
-from baseline.gas.baselines.model import Model
 from .gas_metrics import evaluate
 from .storage import atomic_json, read_json
-from baseline.gas.baselines.model import checkpoint_digest
 
 
 def train(parent_checkpoint, splits, config, seed):

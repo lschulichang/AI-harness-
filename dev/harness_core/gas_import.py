@@ -12,10 +12,11 @@ import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from wrappers.gas_dataset import IMPORT_MANIFEST, GasDriftData, load_gas_model
+
 from .config import RunConfig, project_root
 from .llm_client import OpenAITransport
 from .storage import RunLock, atomic_json, read_json
-from wrappers.gas_dataset import GasDriftData, IMPORT_MANIFEST, load_gas_model
 
 FORMATS = ("auto", "dat", "csv", "tsv", "json", "jsonl")
 

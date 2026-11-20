@@ -2,35 +2,46 @@
 
 import math
 import os
-from pathlib import Path
 import shutil
-from statistics import mean
 import tempfile
-from zipfile import ZipFile, ZIP_DEFLATED
+from pathlib import Path
+from statistics import mean
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
-
 from baseline.gas.baselines.model import Model, checkpoint_digest
 from baseline.gas.baselines.predict import predict as predict_checkpoint
-from contest_harness.errors import HarnessError
-
 from contest_data import (
-    BUNDLES, DATASETS, TASK_TYPES, UNITS, ROOT, BearingProjection, CmapssProjection,
-    GasProjection, Projection, combine_gas_candidate, sha256_matches, validate_model,
+    BUNDLES,
+    DATASETS,
+    ROOT,
+    TASK_TYPES,
+    UNITS,
+    BearingProjection,
+    CmapssProjection,
+    GasProjection,
+    Projection,
+    combine_gas_candidate,
+    sha256_matches,
+    validate_model,
 )
-from harness_core.rul_policy import RulTrainer
-from harness_core.rul_workflow import RUL_POLICIES, checkpoint, run_batch
+from contest_harness.errors import HarnessError
 from harness_core.config import RunConfig
 from harness_core.gas_data import evaluate_samples, gas_samples
 from harness_core.gas_metrics import evaluate as trainer_evaluate
 from harness_core.gas_policy import (
-    GasTrainer, WINDOW_DRIFT_BATCHES, WINDOW_POLICY, WINDOW_TARGET_BATCHES,
-    WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
+    WINDOW_DRIFT_BATCHES,
+    WINDOW_POLICY,
+    WINDOW_TARGET_BATCHES,
+    WINDOW_TRAINER_CONFIG,
+    WINDOW_VALIDATION_BATCHES,
+    GasTrainer,
 )
 from harness_core.gas_workflow import rolling_drift, run_batch_search
+from harness_core.rul_policy import RulTrainer
+from harness_core.rul_workflow import RUL_POLICIES, checkpoint, run_batch
 from harness_core.storage import Ledger, atomic_json
 from harness_core.tracking import Tracker
-
 
 TASKS = ("classification", "regression")
 PREDICT_ARGV = ["python3", "/app/harness.py", "predict"]

@@ -3,8 +3,8 @@ import json
 from statistics import mean
 
 from harness_core.config import RunConfig
-from harness_core.storage import Ledger, read_json
 from harness_core.runner import run_workflow
+from harness_core.storage import Ledger, read_json
 
 
 def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, monkeypatch):
@@ -207,7 +207,6 @@ def test_trainer_absolute_gate_replaces_gain_and_keeps_history_limit():
 
 def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
     import numpy as np
-
     from baseline.gas.baselines.data import flatten, sha256
     from baseline.gas.baselines.model import Model, checkpoint_digest
     from baseline.gas.baselines.train import metrics
@@ -275,7 +274,6 @@ def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
 def test_drift_with_missing_labels_and_unequal_feature_dimensions():
     import numpy as np
     import pytest
-
     from harness_core.gas_drift import detect
     from harness_core.gas_policy import WINDOW_TRAINER_CONFIG
 

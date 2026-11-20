@@ -1,7 +1,6 @@
 """Use the project gas data with the official MLP input format."""
 
 import numpy as np
-
 from wrappers.gas_dataset import load_gas_model
 
 

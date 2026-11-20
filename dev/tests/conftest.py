@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from harness_core import credentials
 from wrappers.gas_dataset import GasDriftData
 

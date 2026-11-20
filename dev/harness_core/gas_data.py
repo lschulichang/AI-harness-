@@ -1,9 +1,7 @@
 """Use the project gas data with the official MLP input format."""
 
 import numpy as np
-
 from wrappers.gas_dataset import GasDriftData, load_gas_model
-
 
 GAS_DATA_DIR = "data/gas+sensor+array+drift+dataset"
 

@@ -4,13 +4,12 @@ import json
 
 import numpy as np
 import pytest
-
 from harness_core.config import RunConfig
 from harness_core.gas_policy import WINDOW_TRAINER_CONFIG, validate
 from harness_core.llm_client import OpenAITransport, Planner
+from harness_core.runner import run_workflow
 from harness_core.storage import Ledger, read_json
 from harness_core.tracking import Tracker
-from harness_core.runner import run_workflow
 
 
 def test_split_and_stream_are_reproducible_and_disjoint(dataset, gas_data, tmp_path):

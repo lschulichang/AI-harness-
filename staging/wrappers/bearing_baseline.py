@@ -1,7 +1,6 @@
 """轴承剩余寿命基线及按轴承分组规则。"""
 from .rul_baseline import RulBaseline
 
-
 PACKAGE = "cpu-b-rul-20261110-v1"
 
 

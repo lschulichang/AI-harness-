@@ -1,6 +1,7 @@
 """轴承剩余寿命基线及按轴承分组规则。"""
-from .rul_baseline import RulBaseline, digest, read_rows
-
+from .rul_baseline import RulBaseline
+from .rul_baseline import digest as digest
+from .rul_baseline import read_rows as read_rows
 
 PACKAGE = "cpu-b-rul-20261110-v1"
 

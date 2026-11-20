@@ -1,5 +1,4 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
-import json
 
 from .llm_client import OpenAITransport, Planner
 

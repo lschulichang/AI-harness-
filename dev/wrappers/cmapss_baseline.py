@@ -5,7 +5,6 @@ import numpy as np
 
 from .rul_baseline import RulBaseline, digest
 
-
 PACKAGE = "cpu-c-guide-20261110-v1"
 RAW_DATA = "data/CMAPSSData"
 

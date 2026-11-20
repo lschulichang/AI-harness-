@@ -1,11 +1,10 @@
 import shutil
 
 import pytest
-
 from harness_core.config import RunConfig
 from harness_core.portability import resolve_model_path, saved_data_path
-from harness_core.storage import atomic_json, read_json
 from harness_core.runner import run_workflow
+from harness_core.storage import atomic_json, read_json
 
 
 def test_project_data_is_saved_as_relative_path(tmp_path):

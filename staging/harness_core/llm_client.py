@@ -3,6 +3,7 @@
 import json
 import time
 
+
 def request_usage_known(request):
     if request.get("status") != "received":
         return False

@@ -3,6 +3,7 @@
 import os
 from pathlib import Path, PureWindowsPath
 
+
 def saved_data_path(path, project):
     path, project = Path(path).resolve(), Path(project).resolve()
     try:

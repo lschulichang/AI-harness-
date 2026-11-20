@@ -7,7 +7,6 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-
 # Physical condition, training bearing, validation bearing in release order.
 PAIRS = (
     ("35Hz12kN", "Bearing1_4", "Bearing1_5"),

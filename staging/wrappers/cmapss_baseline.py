@@ -1,7 +1,6 @@
 """C-MAPSS 剩余寿命基线与最后观测循环公开测试。"""
 from .rul_baseline import RulBaseline
 
-
 PACKAGE = "cpu-c-guide-20261110-v1"
 
 

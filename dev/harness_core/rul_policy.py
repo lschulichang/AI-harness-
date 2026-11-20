@@ -1,7 +1,6 @@
 """B、C 回归训练师的白名单参数和候选反馈。"""
 from .llm_client import OpenAITransport, Planner
 
-
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 LIMITS = {"learning_rate": (1e-6, 0.01), "batch_size": (8, 512),
           "epochs": (1, 50), "window_size": (1, 8)}

@@ -3,7 +3,6 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 PROVIDER_DEFAULTS = {
     "pytrio": ("Qwen/Qwen3.8-27B", "https://pytrio.com/api/openai/v1", "PYTRIO_API_KEY"),
     "deepseek": ("deepseek-flash", "https://api.deepseek.com", "DEEPSEEK_API_KEY"),

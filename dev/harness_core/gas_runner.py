@@ -9,8 +9,11 @@ from pathlib import Path
 from .config import project_root
 from .gas_data import GAS_DATA_DIR, load_gas_model, open_gas_batches
 from .gas_policy import (
-    WINDOW_DRIFT_BATCHES, WINDOW_POLICY,
-    WINDOW_TARGET_BATCHES, WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
+    WINDOW_DRIFT_BATCHES,
+    WINDOW_POLICY,
+    WINDOW_TARGET_BATCHES,
+    WINDOW_TRAINER_CONFIG,
+    WINDOW_VALIDATION_BATCHES,
 )
 from .gas_workflow import checked_path, run_trainer_batches
 from .llm_client import request_usage_known
