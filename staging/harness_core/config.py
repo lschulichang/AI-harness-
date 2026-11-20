@@ -1,26 +1,17 @@
 """运行配置：阈值和预算都在这里集中管理。"""
 
 from dataclasses import asdict, dataclass
-from pathlib import Path
-
-
-PROVIDER_DEFAULTS = {
-    "pytrio": ("Qwen/Qwen3.8-27B", "https://pytrio.com/api/openai/v1", "PYTRIO_API_KEY"),
-    "deepseek": ("deepseek-flash", "https://api.deepseek.com", "DEEPSEEK_API_KEY"),
-}
 
 
 @dataclass
 class RunConfig:
     scenario: str = "stream"
     strategy: str = "llm"
-    provider: str = "pytrio"
+    provider: str = "host_gateway_rpc"
     model: str | None = None
-    base_url: str | None = None
-    api_key_env: str | None = None
-    swanlab_mode: str = "online"
+    swanlab_mode: str = "offline"
     swanlab_project: str = "AI+harness"
-    swanlab_workspace: str | None = "ls_chulichang"
+    swanlab_workspace: str | None = None
     seed: int = 42
     trials_per_batch: int | None = None
     max_experiments: int | None = None
@@ -35,33 +26,7 @@ class RunConfig:
     gas_trainer_min_validation_f1: float | None = None
     rul_min_relative_gain: float = 0.01
     rul_max_history_increase: float = 0.50
-    competition: bool = False
-    data_dir: str = ""
     dataset: str = "gas_mlp"
-    baseline_dir: str = ""
-
-    @classmethod
-    def from_saved_options(cls, options):
-        """读取主线配置，并兼容已保存的滑动窗口运行快照。"""
-        options = dict(options)
-        if options.pop("gas_policy", None) not in (None, "trainer"):
-            raise ValueError("旧搜索策略已移除，历史结果可用 status 查看")
-        for field in (
-            "drift_drop", "gas_sensor_groups", "gas_target_macro_f1",
-            "gas_max_extension_stages", "depths", "leaves", "windows",
-        ):
-            options.pop(field, None)
-        try:
-            return cls(**options)
-        except TypeError as exc:
-            raise ValueError(f"运行配置包含无法识别的字段：{exc}") from exc
-
-    def __post_init__(self):
-        defaults = PROVIDER_DEFAULTS.get(self.provider)
-        if defaults is not None:
-            for field, value in zip(("model", "base_url", "api_key_env"), defaults):
-                if getattr(self, field) is None:
-                    setattr(self, field, value)
 
     def validate(self):
         if self.scenario != "stream" or self.dataset not in {"gas_mlp", "bearing_rul", "cmapss_rul"}:
@@ -75,14 +40,8 @@ class RunConfig:
                     raise ValueError(f"{name} 必须是 0 到 1 的比例")
         if self.strategy not in {"rules", "llm"}:
             raise ValueError("strategy 只能是 llm 或 rules；旧对照入口已移除")
-        if self.provider not in PROVIDER_DEFAULTS:
-            raise ValueError("provider 只能是 deepseek 或 pytrio")
-        if self.swanlab_mode not in {"offline", "online", "disabled"}:
+        if self.swanlab_mode not in {"offline", "disabled"}:
             raise ValueError("SwanLab 模式无效")
-        if self.competition:
-            raise ValueError("官方 SDK 尚未接入：练习入口不能作为正式比赛入口。请先实现官方数据适配器。")
-        if self.provider == "pytrio" and ("deepseek.com" in self.base_url or self.api_key_env == "DEEPSEEK_API_KEY"):
-            raise ValueError("PyTRiO 需要使用其兼容地址和独立密钥环境变量")
         if self.trials_per_batch is not None and (type(self.trials_per_batch) is not int or self.trials_per_batch < 1):
             raise ValueError("单批实验预算无效")
         if self.max_api_calls is not None and (type(self.max_api_calls) is not int or self.max_api_calls < 0):
@@ -112,7 +71,3 @@ class RunConfig:
 
     def to_dict(self):
         return asdict(self)
-
-
-def project_root():
-    return Path(__file__).resolve().parent.parent

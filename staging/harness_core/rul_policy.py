@@ -1,5 +1,5 @@
 """B、C 回归训练师的白名单参数和候选反馈。"""
-from .llm_client import OpenAITransport, Planner
+from .llm_client import Planner
 
 
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
@@ -74,11 +74,6 @@ def validate(proposal, history_count):
 
 
 class RulTrainer(Planner):
-    def __init__(self, config, ledger, transport=None):
-        if transport is None and config.strategy == "llm":
-            transport = OpenAITransport(config, temperature=0)
-        super().__init__(config, ledger, transport)
-
     def decide(self, key, context):
         saved = self.ledger.get("trainer_decision", key)
         if saved is not None:

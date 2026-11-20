@@ -1,5 +1,5 @@
 """轴承剩余寿命基线及按轴承分组规则。"""
-from .rul_baseline import RulBaseline, digest, read_rows
+from .rul_baseline import RulBaseline
 
 
 PACKAGE = "cpu-b-rul-20261110-v1"
@@ -13,11 +13,3 @@ class BearingBaseline(RulBaseline):
     group_names = ("condition1", "condition2", "condition3")
     dataset = "bearing_rul"
     protocol = "bearing_public_condition_replay"
-
-    @staticmethod
-    def identity(row):
-        bearing = row["meta"]["bearing"]
-        prefix = bearing.split("_")[0]
-        if not prefix.startswith("Bearing") or not prefix[7:].isdigit():
-            raise ValueError("无效轴承来源")
-        return "condition" + prefix[7:], bearing

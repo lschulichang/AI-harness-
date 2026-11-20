@@ -3,48 +3,10 @@
 import json
 import time
 
-from .credentials import get_secret
-
-
 def request_usage_known(request):
     if request.get("status") != "received":
         return False
     return request.get("usage_known", all(key in request for key in ("prompt_tokens", "completion_tokens")))
-
-
-class OpenAITransport:
-    def __init__(self, config, *, temperature=0.2, default_max_tokens=None):
-        from openai import OpenAI
-        key = get_secret(config.api_key_env)
-        if not key:
-            raise ValueError(f"请在环境变量或 local_secrets.py 中配置 {config.api_key_env}")
-        self.config = config
-        self.temperature = temperature
-        self.default_max_tokens = default_max_tokens
-        # 禁用 SDK 隐式重试，使每个请求都能计入我们自己的预算。
-        self.client = OpenAI(api_key=key, base_url=config.base_url, timeout=config.api_timeout, max_retries=0)
-
-    def __call__(self, messages, *, max_tokens=None):
-        kwargs = {}
-        limit = self.config.max_output_tokens if max_tokens is None else max_tokens
-        if limit is None:
-            limit = self.default_max_tokens
-        if limit is not None:
-            kwargs["max_tokens"] = limit
-        if self.config.provider == "deepseek":
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        response = self.client.chat.completions.create(
-            model=self.config.model, messages=messages, response_format={"type": "json_object"},
-            temperature=self.temperature, **kwargs,
-        )
-        usage = response.usage
-        prompt_tokens = getattr(usage, "prompt_tokens", None)
-        completion_tokens = getattr(usage, "completion_tokens", None)
-        return {
-            "content": response.choices[0].message.content or "",
-            "prompt_tokens": prompt_tokens or 0, "completion_tokens": completion_tokens or 0,
-            "usage_known": prompt_tokens is not None and completion_tokens is not None,
-        }
 
 
 class Planner:
@@ -73,12 +35,7 @@ class Planner:
                     return None, "API 请求预算已用尽"
                 started = time.perf_counter()
                 try:
-                    if self.transport is None:
-                        self.transport = OpenAITransport(self.config)
-                    if isinstance(self.transport, OpenAITransport):
-                        response = self.transport(messages, max_tokens=reservation.get("reserved_output_tokens"))
-                    else:
-                        response = self.transport(messages)
+                    response = self.transport(messages)
                     request = {**reservation, "status": "received", **response}
                 except Exception as exc:
                     request = {**reservation, "status": "error", "error_type": type(exc).__name__}

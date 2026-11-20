@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-from .credentials import get_secret
 from .llm_client import request_usage_known
 
 
@@ -36,7 +35,7 @@ class Tracker:
                     project=config.swanlab_project, workspace=config.swanlab_workspace, name=self.root.name,
                     id=self.root.name, resume="allow", mode=config.swanlab_mode,
                     log_dir=str(self.root / "swanlog"), config=logged_config, reinit=True,
-                    on_online_error="offline", settings=swanlab.Settings(api_key=get_secret("SWANLAB_API_KEY"), probe={
+                    settings=swanlab.Settings(probe={
                         "hardware": False, "monitor": False, "requirements": False, "git": False}),
                 )
             except Exception as exc:
@@ -147,38 +146,6 @@ class Tracker:
         ]
         values["batch/details"] = swanlab.Text(json.dumps(details, ensure_ascii=False))
         self._log(values, batch * self.stride + self.stride - 1, f"batch_{batch}")
-
-    def log_final(self, summary):
-        if self.session is None or not summary["complete"] or self.ledger.get("tracking_export", "final"):
-            return
-        metric = self.metric
-        fields = (
-            "batches_completed",
-            f"mean_before_test_{metric}", f"mean_test_{metric}",
-            f"worst_before_test_{metric}", f"worst_test_{metric}",
-            "mean_before_test_accuracy", "mean_test_accuracy",
-            "mean_static_validation_rmse", "mean_before_validation_rmse", "mean_validation_rmse",
-            "worst_validation_rmse", "mean_static_validation_mae", "mean_before_validation_mae",
-            "mean_validation_mae", "max_history_relative_increase",
-            "experiments", "accepted_models", "failed_stages",
-            "training_sample_passes", "training_seconds", "total_decision_seconds",
-            "mean_feature_psi", "drift_profiled_batches", "drift_detected_batches",
-            "api_calls", "llm_proposals", "fallback_experiments", "prompt_tokens", "completion_tokens",
-            "trainer_decisions", "llm_decisions", "fallback_decisions", "reserved_training_sample_passes",
-            "requests_with_unknown_usage",
-        )
-        values = {f"final/{key}": summary[key] for key in fields if summary.get(key) is not None}
-        if "prompt_tokens" in summary and "completion_tokens" in summary:
-            values["final/total_tokens"] = summary["prompt_tokens"] + summary["completion_tokens"]
-        if public_test := summary.get("public_test"):
-            for stage in ("static", "final"):
-                for metric, value in public_test["pooled"][stage].items():
-                    if value is not None:
-                        values[f"public_test/{stage}_{metric}"] = value
-        last_batch = max((row["batch"] for row in self.ledger.items("trial") + self.ledger.items("batch")), default=0)
-        final_step = (last_batch + 2) * self.stride
-        if self._log(values, final_step, "final_summary"):
-            self.ledger.put("tracking_export", "final", {"logged": True})
 
     def close(self, success=True):
         if self.session:

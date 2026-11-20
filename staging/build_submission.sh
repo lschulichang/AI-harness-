@@ -3,7 +3,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 tag=contest-harness-abc:1.0.2
-archive=contest-harness-abc-linux-amd64.tar
+archive=mirror/2.tar
 
 docker build --platform linux/amd64 --tag "$tag" .
 test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$tag")" = linux/amd64
@@ -17,6 +17,7 @@ assert description["sdk_version"] == "1.0.2"
 assert set(description["tasks"]) == {"classification", "regression"}
 print(json.dumps(description))
 '
+mkdir -p -- "$(dirname -- "$archive")"
 pending=$(mktemp "./${archive}.XXXXXXXX")
 trap 'rm -f -- "$pending"' EXIT
 docker image save -o "$pending" "$tag"

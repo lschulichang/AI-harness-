@@ -1,6 +1,6 @@
 # A、B、C 比赛 Harness
 
-提交目录为 `/home/adc/桌面/LXB/harness`。一个 Linux/amd64 镜像接入 SDK 1.0.2 的 `contest.harness.workspace.v2` 协议。平台启动 `python3 /app/harness.py describe|train|predict`，训练时按 `dataset_key` 分发。
+提交目录为 `/home/adc/桌面/LXB/staging`。一个 Linux/amd64 镜像接入 SDK 1.0.2 的 `contest.harness.workspace.v2` 协议。平台启动 `python3 /app/harness.py describe|train|predict`，训练时按 `dataset_key` 分发。
 
 | 任务 | 训练闭环 | 当前验证主指标 |
 | --- | --- | --- |
@@ -17,12 +17,12 @@
 在可以访问基础镜像和 Python 依赖的 Docker 环境中运行：
 
 ```bash
-cd '/home/adc/桌面/LXB/harness'
+cd '/home/adc/桌面/LXB/staging'
 bash build_submission.sh
 ```
 
-脚本构建并在只读根文件系统运行 `describe`，随后用 `docker image save` 导出并核验单个 Linux/amd64 镜像。上传生成的 `contest-harness-abc-linux-amd64.tar` 到比赛平台，再使用平台提供的试运行检查真实宿主。
+脚本构建并在只读根文件系统运行 `describe`，随后用 `docker image save` 导出并核验单个 Linux/amd64 镜像。上传生成的 `mirror/2.tar` 到比赛平台，再使用平台提供的试运行检查真实宿主。
 
 ## 更新开发代码
 
-A、B、C 的算法文件由同级 `AI+harness` 开发目录维护。算法有更新时先运行 `bash sync_sources.sh` 同步镜像所需的源文件，再构建。比赛适配代码集中在 `contest_data.py` 和 `contest_submission.py`。
+A、B、C 的算法文件由同级 `dev` 开发目录维护。算法有更新时先运行 `bash sync_sources.sh`，将当前闭环同步为仅使用比赛宿主网关的版本，再构建。比赛适配代码集中在 `contest_data.py` 和 `contest_submission.py`。

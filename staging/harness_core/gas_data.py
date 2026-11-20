@@ -2,16 +2,7 @@
 
 import numpy as np
 
-from wrappers.gas_dataset import GasDriftData, load_gas_model
-
-
-GAS_DATA_DIR = "data/gas+sensor+array+drift+dataset"
-
-
-def open_gas_batches(path, seed, *, model_meta=None):
-    if (path / "gas+sensor+array+drift+dataset").is_dir():
-        path = path / "gas+sensor+array+drift+dataset"
-    return GasDriftData(path, seed, model_meta=model_meta)
+from wrappers.gas_dataset import load_gas_model
 
 
 def evaluate_samples(model_path, samples):
@@ -26,7 +17,3 @@ def evaluate_samples(model_path, samples):
 def gas_samples(data, batch, split):
     x, labels, _ = data.load(batch, split)
     return {"x": x, "y": np.asarray(labels) - 1}
-
-
-def evaluate(model_path, data, batch, split):
-    return evaluate_samples(model_path, gas_samples(data, batch, split))

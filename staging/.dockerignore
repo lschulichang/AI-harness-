@@ -21,3 +21,7 @@
 !baseline/*/baselines/configs/*.json
 **/__pycache__/
 **/*.pyc
+harness_core/gas_runner.py
+harness_core/credentials.py
+harness_core/resource_monitor.py
+wrappers/bearing_pairs.py

@@ -1,28 +1,18 @@
 """回放 B、C 公开数据，按当前与历史 RMSE 门槛选模。"""
-from datetime import datetime
-from pathlib import Path
 from statistics import mean
 from zipfile import BadZipFile
 import os
-import shutil
 import subprocess
 import sys
 import time
-from uuid import uuid4
 
 import numpy as np
-from threadpoolctl import threadpool_limits
 
-from wrappers.bearing_baseline import BearingBaseline, PACKAGE, digest
-from wrappers.bearing_pairs import PairedBearingBaseline, REPLAY_DIR
-from wrappers.cmapss_baseline import CmapssBaseline, PACKAGE as C_PACKAGE, RAW_DATA, test_scores
-from .rul_policy import RulTrainer, LIMITS, TRAINING_ACTIONS, training_defaults
-from .config import project_root
+from wrappers.rul_baseline import digest
+from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults
 from .feature_drift import detect_features
-from .llm_client import request_usage_known
-from .portability import resolve_model_path, saved_data_path
-from .storage import Ledger, RunLock, atomic_json, read_json
-from .tracking import Tracker
+from .portability import resolve_model_path
+from .storage import read_json
 from .runner import training_window
 
 
@@ -83,7 +73,7 @@ def choose_candidate(attempts):
 
 def train_candidate(config, adapter, parent, output, key, params, inputs):
     env = os.environ.copy()
-    for name in (config.api_key_env, "DEEPSEEK_API_KEY", "PYTRIO_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
+    for name in ("DEEPSEEK_API_KEY", "PYTRIO_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
         env.pop(name, None)
     env.update(BASELINE_CPU_THREADS="1", PYTHONDONTWRITEBYTECODE="1", OPENBLAS_NUM_THREADS="1",
                OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
@@ -307,188 +297,3 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
     unit = "循环" if adapter.unit == "cycles" else "分钟"
     print(f"{name}: RMSE {static['rmse']:.3f} / {before['rmse']:.3f} / {score['rmse']:.3f} {unit}", flush=True)
     return row
-
-
-def evaluate_public_test(adapter, data_dir, baseline, final):
-    groups = []
-    for batch, name in enumerate(adapter.group_names):
-        samples = adapter.test_samples(batch, data_dir)
-        groups.append({"group": name, "static": test_scores(baseline, samples),
-                       "final": test_scores(final, samples)})
-
-    pooled = {}
-    for stage in ("static", "final"):
-        rows = [group[stage] for group in groups]
-        count = sum(row["samples"] for row in rows)
-        pooled[stage] = {
-            "samples": count,
-            "rmse": float(np.sqrt(sum(row["rmse"] ** 2 * row["samples"] for row in rows) / count)),
-            "mae": sum(row["mae"] * row["samples"] for row in rows) / count,
-            "nasa_score": sum(row["nasa_score"] for row in rows)
-            if all(row["nasa_score"] is not None for row in rows) else None,
-        }
-    return {"scope": "last_observation_per_public_test_engine", "groups": groups, "pooled": pooled}
-
-
-def write_summary(root, ledger, manifest, active, public_test=None):
-    batches, trials, requests = ledger.items("batch"), ledger.items("trial"), ledger.requests()
-    plans = ledger.items("trainer_decision")
-    policy_key, _ = RUL_POLICIES[manifest["dataset"]]
-    summary = {"dataset": manifest["dataset"], "metric": "rmse", "unit": manifest["unit"],
-               "evaluation_protocol": manifest["protocol"], "independent_test_available": "test" in manifest,
-               "initial_checkpoint_already_saw_all_public_training": True,
-               "initial_checkpoint_saw_replay_training": manifest.get("initial_checkpoint_saw_replay_training", True),
-               "complete": len(batches) == len(manifest["groups"]), "batches_completed": len(batches),
-               "experiments": len(trials), "accepted_models": sum(row["promoted"] for row in batches),
-               "failed_stages": sum(trial["status"] == "failed" for trial in trials),
-               "training_seconds": sum(trial["training_seconds"] for trial in trials),
-               "training_sample_passes": sum(trial["sample_passes"] for trial in trials),
-               "reserved_training_sample_passes": sum(r["sample_passes"] for r in ledger.items("training_reservation")),
-               "api_calls": len(requests), "requests_with_unknown_usage": sum(not request_usage_known(r) for r in requests),
-               "prompt_tokens": sum(r.get("prompt_tokens", 0) for r in requests),
-               "completion_tokens": sum(r.get("completion_tokens", 0) for r in requests),
-               "trainer_decisions": len(plans), "llm_decisions": sum(p["source"] == "trainer_llm" for p in plans),
-               "fallback_decisions": sum(p["source"] == "rules_fallback" for p in plans),
-               "final_checkpoint": active["model_path"], "final_checkpoint_sha256": active["checkpoint_sha256"],
-               policy_key: manifest[policy_key], "batches": batches}
-    if public_test is not None:
-        summary["public_test"] = public_test
-    if batches:
-        for metric in ("rmse", "mae"):
-            for stage in ("static_", "before_", ""):
-                key = f"{stage}validation_{metric}"
-                summary[f"mean_{key}"] = mean(row[key] for row in batches)
-        summary["worst_validation_rmse"] = max(row["validation_rmse"] for row in batches)
-        summary["max_history_relative_increase"] = max(
-            (row["max_history_relative_increase"] for row in batches if row["max_history_relative_increase"] is not None),
-            default=None)
-    atomic_json(root / "summary.json", summary)
-    atomic_json(root / "active.json", active)
-    if manifest["profile"] == "C":
-        title, unit = "C 发动机公开验证回放", "循环"
-        provenance = "公开训练与验证按整台发动机划分，初始检查点已经使用全部公开训练轨迹。"
-    else:
-        title, unit = "B 轴承公开验证回放", "分钟"
-        provenance = ("每个工况用清单指定的两根轴承分别续训和验证。"
-                      if not summary["initial_checkpoint_saw_replay_training"] else
-                      "初始检查点已使用本次回放的公开训练轴承。")
-    lines = [f"# {title}", "", f"单位为{unit}，表内为 RMSE / MAE。{provenance}", "",
-             "| 工况 | 静态基线 | 批初模型 | 选中模型 | 决策 |",
-             "|---|---:|---:|---:|---|"]
-    for row in batches:
-        pairs = [f"{row[f'{stage}validation_rmse']:.3f} / {row[f'{stage}validation_mae']:.3f}"
-                 for stage in ("static_", "before_", "")]
-        lines.append("| " + " | ".join([row["source_file"], *pairs, "更新" if row["promoted"] else "保留"]) + " |")
-    if public_test is not None:
-        lines += ["", "## NASA 公开测试", "",
-                  "全部选模结束后，用每台发动机最后一个可见循环评估静态基线和最终模型。", "",
-                  "| 子集 | 发动机 | 静态 RMSE / MAE | 最终 RMSE / MAE | 静态 NASA 分 | 最终 NASA 分 |",
-                  "|---|---:|---:|---:|---:|---:|"]
-        for row in [*public_test["groups"], {"group": "合计", **public_test["pooled"]}]:
-            def nasa(value):
-                return f"{value:.3g}" if value is not None else "溢出"
-            old, new = row["static"], row["final"]
-            lines.append(f"| {row['group']} | {old['samples']} | {old['rmse']:.3f} / {old['mae']:.3f} | "
-                         f"{new['rmse']:.3f} / {new['mae']:.3f} | {nasa(old['nasa_score'])} | {nasa(new['nasa_score'])} |")
-    (root / "batch_results.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return summary
-
-
-def run_rul(config, *, runs_root=None, resume=None, transport=None, stop_after=None, persist_config=False):
-    project = project_root()
-    saved = read_json(Path(resume).resolve() / "dataset.json") if resume else {}
-    explicit_data = (project / config.data_dir).resolve() if config.data_dir else None
-    raw_test = None
-    if config.dataset == "cmapss_rul":
-        bundle = (project / (config.baseline_dir or f"baseline/{C_PACKAGE}")).resolve()
-        raw_test = explicit_data if explicit_data is not None else project / RAW_DATA
-        if (raw_test / "CMAPSSData").is_dir():
-            raw_test = raw_test / "CMAPSSData"
-        adapter = CmapssBaseline(bundle)
-    else:
-        # Historical B runs with the public split continue using that same split.
-        bundle = (project / (config.baseline_dir or f"baseline/{PACKAGE}")).resolve()
-        public_bundle = explicit_data is not None and (explicit_data / "baseline-info.json").is_file()
-        if public_bundle:
-            if config.baseline_dir and bundle != explicit_data:
-                raise ValueError("公开包回放的数据和检查点必须来自同一个公开基线包")
-            bundle = explicit_data
-        legacy = (saved.get("protocol") == "bearing_public_condition_replay" if resume else public_bundle)
-        replay_dir = explicit_data or project / REPLAY_DIR
-        adapter = BearingBaseline(bundle) if legacy else PairedBearingBaseline(bundle, replay_dir)
-
-    policy_key, policy_version = RUL_POLICIES[config.dataset]
-    manifest = {**adapter.manifest, policy_key: {
-        "version": policy_version, "drift_settings": DRIFT, "drift_window": DRIFT_WINDOW,
-        "history_window": HISTORY_WINDOW, "validation_target_window": VALIDATION_TARGET_WINDOW,
-        "history_reference": "batch_entry", "max_candidates_per_batch": config.candidate_limit,
-        "min_relative_gain": config.rul_min_relative_gain, "max_history_increase": config.rul_max_history_increase}}
-    if raw_test is not None:
-        manifest["test"] = adapter.test_manifest(raw_test)
-    if resume:
-        root = Path(resume).resolve()
-        if read_json(root / "dataset.json") != manifest:
-            raise ValueError("恢复 RUL 运行时数据、基线或策略与原运行不一致")
-    else:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        root = (Path(runs_root or project / "runs") /
-                f"{stamp}_{config.dataset}_{config.strategy}_{uuid4().hex[:8]}").resolve()
-        root.mkdir(parents=True)
-        config.baseline_dir = saved_data_path(bundle, project)
-        if raw_test is not None:
-            config.data_dir = saved_data_path(raw_test, project)
-        elif not legacy:
-            config.data_dir = saved_data_path(replay_dir, project)
-        elif config.data_dir:
-            config.data_dir = config.baseline_dir
-        atomic_json(root / "config.json", config.to_dict())
-        atomic_json(root / "dataset.json", manifest)
-    print(f"运行目录：{root}", flush=True)
-    with RunLock(root / "run.lock"), threadpool_limits(limits=1):
-        if persist_config:
-            atomic_json(root / "config.json", config.to_dict())
-        path = root / "models/baseline.npz"
-        if not path.exists():
-            path.parent.mkdir(exist_ok=True)
-            temporary = path.with_suffix(".tmp")
-            shutil.copyfile(bundle / "checkpoint.npz", temporary)
-            temporary.replace(path)
-        if digest(path) != manifest["checkpoint_sha256"]:
-            raise ValueError("运行内 RUL 初始检查点摘要不匹配")
-        baseline = adapter.load_model(path)
-        active = checkpoint(root, path, baseline)
-        ledger = Ledger(root / "experiments.sqlite")
-        tracker, complete = None, False
-        try:
-            tracker = Tracker(config, root, ledger, metric="rmse", run_metadata={
-                "unit": adapter.unit, "baseline_id": manifest["baseline_id"], "evaluation_protocol": manifest["protocol"],
-                policy_key: manifest[policy_key]})
-            planner = RulTrainer(config, ledger, transport)
-            history = []
-            for batch in range(len(adapter.group_names)):
-                row = ledger.get("batch", f"b{batch + 1:02d}")
-                if row is None:
-                    row = run_batch(config, adapter, root, ledger, tracker, planner, batch,
-                                    active, baseline, history, stop_after)
-                if row is None:
-                    break
-                if row["entry"] != active:
-                    raise ValueError("批初检查点与上一个批次末尾不一致")
-                checked_path(root, row["selected"], adapter)
-                history.append(row)
-                active = row["selected"]
-            public_test = None
-            if raw_test is not None and len(history) == len(adapter.group_names):
-                final = adapter.load_model(checked_path(root, active, adapter))
-                public_test = evaluate_public_test(adapter, raw_test, baseline, final)
-            summary = write_summary(root, ledger, manifest, active, public_test)
-            complete = summary["complete"]
-            tracker.log_final(summary)
-            return summary
-        finally:
-            if tracker is not None:
-                tracker.close(success=complete)
-            ledger.close()
-
-
-run_bearing_rul = run_rul  # 保留原 B 调用入口。

@@ -1,7 +1,7 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 import json
 
-from .llm_client import OpenAITransport, Planner
+from .llm_client import Planner
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
@@ -132,11 +132,6 @@ def compact_input(context, cfg):
 
 
 class GasTrainer(Planner):
-    def __init__(self, config, ledger, transport=None):
-        if transport is None and config.strategy == "llm":
-            transport = OpenAITransport(config, temperature=0)
-        super().__init__(config, ledger, transport)
-
     def decide(self, key, context, cfg, *, feedback=None):
         saved = self.ledger.get("trainer_decision", key)
         if saved is not None:

@@ -5,22 +5,16 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from statistics import mean
 from zipfile import BadZipFile
 
 import numpy as np
 
 from baseline.gas.baselines.model import Model, checkpoint_digest
 
-from .gas_data import evaluate, evaluate_samples, gas_samples
+from .gas_data import evaluate_samples, gas_samples
 from .gas_drift import detect, label_distribution
 from .runner import training_window
-from .gas_metrics import evaluate as trainer_evaluate
-from .gas_policy import (
-    GasTrainer, TRAINING_ACTIONS, WINDOW_DRIFT_BATCHES,
-    WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
-)
-from .resource_monitor import BatchMeter
+from .gas_policy import TRAINING_ACTIONS, WINDOW_TRAINER_CONFIG
 from .portability import resolve_model_path
 from .storage import atomic_json, read_json
 
@@ -35,7 +29,7 @@ def checked_path(root, entry):
 def train_candidate(config, parent, output, train, validation, request):
     output.parent.mkdir(exist_ok=True)
     env = os.environ.copy()
-    for key in (config.api_key_env, "PYTRIO_API_KEY", "DEEPSEEK_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
+    for key in ("PYTRIO_API_KEY", "DEEPSEEK_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
         env.pop(key, None)
     env.update(BASELINE_CPU_THREADS="1", OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
     with tempfile.TemporaryDirectory(prefix="gas-trainer-input-") as temp:
@@ -315,140 +309,3 @@ def run_batch_search(config, root, ledger, tracker, planner, batch, entry, entry
         best = {**best_below_target, "selected": best_below_target["fallback_candidate"],
                 "selected_below_target": True}
     return best, plans, attempts, stop_reason
-
-
-def run_trainer_batches(config, bundle, root, ledger, tracker, transport, baseline, active,
-                        data, batches, manifest, stop_after):
-    meter = BatchMeter(ledger)
-    planner = GasTrainer(config, ledger, transport)
-    model_meta = Model.load(baseline).meta
-    policy = manifest["gas_trainer_policy"]
-    target_window = policy.get("validation_target_window")
-    histories, completed, decision_history = [], [], []
-    try:
-        for batch in batches:
-            batch_key = f"{batch:02d}"
-            validation = gas_samples(data, batch, "validation")
-            name = data.batch_names[batch]
-            saved = ledger.get("batch", batch_key)
-            if saved is not None:
-                active = saved["selected"]
-                decision_history.insert(0, saved["trainer_history"])
-                histories.append((name, validation))
-                completed.append(batch)
-                continue
-            trial_id = f"b{batch + 1:02d}-trainer"
-            meter.start(batch, at_entry=ledger.get("trainer_decision", trial_id) is None)
-            entry = active
-            entry_path = checked_path(root, entry)
-            model = Model.load(entry_path)
-            train = gas_samples(data, batch, "train")
-            current = evaluate_samples(entry_path, validation)
-            batch_size = data.batch_size(batch)
-            drift = ledger.get("trainer_drift", batch_key)
-            if drift is None:
-                drift = rolling_drift(data, completed[-WINDOW_DRIFT_BATCHES:], train,
-                                      WINDOW_TRAINER_CONFIG["drift"], config.seed + batch + 1,
-                                      model_meta["classes"])
-                ledger.put("trainer_drift", batch_key, drift)
-            directory = root / "reports" / Path(name).stem
-            atomic_json(directory / "drift.json", drift)
-            label_status = drift["label_distribution"].get("status", "available")
-            drift_report = {
-                "mmd": drift["global"], "drifted_features": drift["drifted_features"],
-                "label_status": label_status, "label_js_divergence": drift["label_distribution"]["js_divergence"],
-                "status": drift["status"], "reference_batches": drift["reference_batches"],
-            }
-            candidate_histories = histories[-WINDOW_VALIDATION_BATCHES:]
-            replay_batches = [data.batch_names[i] for i in completed[-7:]]
-            context = {
-                "drift_report": drift_report,
-                "performance": {
-                    "current": trainer_evaluate(model, validation),
-                },
-                "data": {"new_labeled_samples": batch_size, "replay_batches": replay_batches,
-                         "historical_replay_available": bool(replay_batches)},
-                "history": decision_history,
-            }
-            target_batches = completed[-target_window:] if target_window else []
-            validation_target = policy.get("min_validation_macro_f1")
-            if target_batches:
-                validation_target = mean(ledger.get("batch", f"{i:02d}")["validation_macro_f1"]
-                                         for i in target_batches)
-            context["validation_target"] = validation_target
-            result = run_batch_search(
-                config, root, ledger, tracker, planner, batch, entry, entry_path, model,
-                train, validation, current, candidate_histories,
-                manifest["raw_gas"]["dataset_id"], context, directory, policy, stop_after,
-                min_validation_f1=validation_target, data=data, completed=completed,
-            )
-            if result is None:
-                return entry
-            best, plans, attempts, stop_reason = result
-            if best is not None:
-                active = best["selected"]
-            selected_id = best["id"] if best else None
-            selected_number = next((i for i, attempt in enumerate(attempts)
-                                    if attempt["trial_id"] == selected_id), 0)
-            plan = plans[selected_number]
-            action = plan["output"]["decision"]
-            chosen_path = checked_path(root, active)
-            final = evaluate_samples(chosen_path, validation)
-            promoted = active["model_path"] != entry["model_path"]
-            trainer_gain = trainer_evaluate(Model.load(chosen_path), validation)["macro_f1"] - context["performance"]["current"]["macro_f1"]
-            # Persist the chosen model before evaluating held-out samples.
-            active = {**active, "validation": final}
-            atomic_json(root / "active.json", active)
-            profile = meter.finish(batch)
-            before, after = (evaluate(path, data, batch, "test") for path in (entry_path, chosen_path))
-            row = {
-                "batch": batch, "source_file": name, "selected": active, "promoted": promoted,
-                "experiment_count": len(attempts), "train_samples": len(train["y"]),
-                "validation_samples": len(validation["y"]),
-                "test_samples": batch_size - len(train["y"]) - len(validation["y"]),
-                "before_model_path": entry["model_path"], "model_path": active["model_path"],
-                "training_sample_passes": sum(t["sample_passes"] for t in attempts),
-                "trainer_feedback_enabled": config.strategy == "llm",
-                "selected_trial_id": selected_id, "trainer_attempts": attempts,
-                "selected_below_target": best is not None and best.get("selected_below_target", False),
-                "trainer_min_validation_f1": validation_target,
-                "trainer_last_action": plans[-1]["output"]["decision"],
-                "trainer_last_reason": plans[-1]["output"]["reason"],
-                "validation_drop": current["macro_f1"] - final["macro_f1"],
-                "update_test_gain": after["macro_f1"] - before["macro_f1"],
-                "update_test_accuracy_gain": after["accuracy"] - before["accuracy"],
-                "trainer_action": action, "trainer_source": plan["metadata"]["source"],
-                "trainer_reason": plan["output"]["reason"], "stop_reason": stop_reason,
-                "trainer_history": {
-                    "batch": batch + 1, "decision": action, "deployed": promoted,
-                    "macro_f1_gain": trainer_gain, "drifted_feature_count": len(drift["drifted_features"]),
-                },
-                "feature_drift": {
-                    "mean_psi": float(np.mean([f["psi"] for f in drift["features"]])) if drift["features"] else None,
-                    "detected": bool(drift["drifted_features"]), "mmd": drift["global"],
-                    "label_status": label_status,
-                    "label_js_divergence": drift["label_distribution"]["js_divergence"],
-                    "status": drift["status"], "reference_batches": drift["reference_batches"],
-                },
-                "drift_reference_batches": drift["reference_batches"],
-                "history_validation_batches": [group for group, _ in candidate_histories],
-                "test_protocol": "development_holdout_previously_public" if batch == 1 else "local_holdout",
-                **profile,
-            }
-            for metric in ("macro_f1", "accuracy"):
-                row.update({f"before_validation_{metric}": current[metric], f"validation_{metric}": final[metric],
-                            f"before_test_{metric}": before[metric], f"test_{metric}": after[metric]})
-            if target_window:
-                row["trainer_validation_target_batches"] = [data.batch_names[i] for i in target_batches]
-            ledger.put("batch", batch_key, row)
-            tracker.log_batch(row)
-            histories.append((name, validation))
-            completed.append(batch)
-            decision_history.insert(0, row["trainer_history"])
-            print(f"{name} {row['trainer_source']} → {action} → {stop_reason}，"
-                  f"验证 Macro-F1 {current['macro_f1']:.4f} → {final['macro_f1']:.4f}", flush=True)
-            if attempts and stop_after is not None and ledger.count("trial") >= stop_after:
-                break
-        return active
-    finally:
-        meter.close()
