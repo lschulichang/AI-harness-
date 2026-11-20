@@ -6,10 +6,10 @@ import json
 import numpy as np
 import pytest
 
-from harness_demo.config import project_root
-from harness_demo.gas_import import convert, detect, draft_mapping, mapped_rows
-from harness_demo.gas_mlp_data import open_gas_batches
-from harness_demo.gas_mlp import replay_batches
+from harness_core.config import project_root
+from harness_core.gas_import import convert, detect, draft_mapping, mapped_rows
+from harness_core.gas_data import open_gas_batches
+from harness_core.gas_runner import replay_batches
 
 
 def test_shuffled_csv_preserves_gas_batch_and_predictions(tmp_path, official_bundle):

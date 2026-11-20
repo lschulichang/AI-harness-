@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from harness_demo import credentials
-from wrappers.gas_drift import GasDriftData
+from harness_core import credentials
+from wrappers.gas_dataset import GasDriftData
 
 
 @pytest.fixture(autouse=True)

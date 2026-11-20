@@ -9,7 +9,7 @@ import time
 import numpy as np
 
 from baseline.gas.baselines.model import Model
-from .gas_trainer_metrics import evaluate
+from .gas_metrics import evaluate
 from .storage import atomic_json, read_json
 from baseline.gas.baselines.model import checkpoint_digest
 

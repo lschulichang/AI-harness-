@@ -1,8 +1,8 @@
 **
 !Dockerfile
 !requirements-harness.txt
-!harness_demo/
-!harness_demo/**
+!harness_core/
+!harness_core/**
 !wrappers/
 !wrappers/**
 !run.py

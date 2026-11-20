@@ -16,14 +16,14 @@ from threadpoolctl import threadpool_limits
 from wrappers.bearing_baseline import BearingBaseline, PACKAGE, digest
 from wrappers.bearing_pairs import PairedBearingBaseline, REPLAY_DIR
 from wrappers.cmapss_baseline import CmapssBaseline, PACKAGE as C_PACKAGE, RAW_DATA, test_scores
-from .bearing_trainer_policy import RulTrainer, LIMITS, TRAINING_ACTIONS, training_defaults
+from .rul_policy import RulTrainer, LIMITS, TRAINING_ACTIONS, training_defaults
 from .config import project_root
 from .feature_drift import detect_features
-from .planner import request_usage_known
+from .llm_client import request_usage_known
 from .portability import resolve_model_path, saved_data_path
 from .storage import Ledger, RunLock, atomic_json, read_json
 from .tracking import Tracker
-from .workflow import training_window
+from .runner import training_window
 
 
 POLICY = "bearing_window_v2"

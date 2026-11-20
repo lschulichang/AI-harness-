@@ -1,8 +1,8 @@
 import json
 
-from harness_demo.config import RunConfig
-from harness_demo.storage import Ledger
-from harness_demo.tracking import Tracker
+from harness_core.config import RunConfig
+from harness_core.storage import Ledger
+from harness_core.tracking import Tracker
 
 
 def test_cloud_log_contains_batch_test_and_final_summary(tmp_path, monkeypatch):

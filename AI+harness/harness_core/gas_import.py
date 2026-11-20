@@ -13,9 +13,9 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from .config import RunConfig, project_root
-from .planner import OpenAITransport
+from .llm_client import OpenAITransport
 from .storage import RunLock, atomic_json, read_json
-from wrappers.gas_drift import GasDriftData, IMPORT_MANIFEST, load_gas_model
+from wrappers.gas_dataset import GasDriftData, IMPORT_MANIFEST, load_gas_model
 
 FORMATS = ("auto", "dat", "csv", "tsv", "json", "jsonl")
 

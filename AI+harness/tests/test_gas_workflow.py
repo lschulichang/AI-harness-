@@ -2,13 +2,13 @@
 import json
 from statistics import mean
 
-from harness_demo.config import RunConfig
-from harness_demo.storage import Ledger, read_json
-from harness_demo.workflow import run_workflow
+from harness_core.config import RunConfig
+from harness_core.storage import Ledger, read_json
+from harness_core.runner import run_workflow
 
 
 def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, monkeypatch):
-    import harness_demo.gas_trainer_workflow as workflow
+    import harness_core.gas_workflow as workflow
 
     params = {"learning_rate": .0003, "batch_size": 96, "epochs": 2, "early_stopping_patience": 1,
               "weight_decay": .0002, "window_size": 4, "class_weighting": True}
@@ -111,7 +111,7 @@ def test_incomplete_llm_plan_is_rejected_before_training(dataset, tmp_path):
 
 
 def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, monkeypatch):
-    import harness_demo.gas_trainer_workflow as workflow
+    import harness_core.gas_workflow as workflow
 
     real_candidate = workflow.evaluate_candidate
     real_evaluate = workflow.evaluate
@@ -190,7 +190,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
 
 
 def test_trainer_absolute_gate_replaces_gain_and_keeps_history_limit():
-    from harness_demo.gas_trainer_workflow import candidate_gate_failures
+    from harness_core.gas_workflow import candidate_gate_failures
 
     cfg = RunConfig(gas_trainer_min_validation_f1=.95)
     target = cfg.gas_trainer_min_validation_f1
@@ -211,8 +211,8 @@ def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
     from baseline.gas.baselines.data import flatten, sha256
     from baseline.gas.baselines.model import Model, checkpoint_digest
     from baseline.gas.baselines.train import metrics
-    from harness_demo.gas_import import dat_line
-    from harness_demo.storage import atomic_json
+    from harness_core.gas_import import dat_line
+    from harness_core.storage import atomic_json
 
     classes = ["gas-a", "gas-b", "gas-c"]
     groups = {"sensor-left": [1, 4], "sensor-right": [2, 3, 5]}
@@ -276,8 +276,8 @@ def test_drift_with_missing_labels_and_unequal_feature_dimensions():
     import numpy as np
     import pytest
 
-    from harness_demo.gas_trainer_drift import detect
-    from harness_demo.gas_trainer_policy import WINDOW_TRAINER_CONFIG
+    from harness_core.gas_drift import detect
+    from harness_core.gas_policy import WINDOW_TRAINER_CONFIG
 
     ref = {"x": np.arange(60, dtype=float).reshape(20, 3), "y": np.tile([0, 1], 10)}
     cur = {"x": ref["x"] + 2, "y": None}
@@ -295,7 +295,7 @@ def test_drift_with_missing_labels_and_unequal_feature_dimensions():
 
 
 def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path, monkeypatch):
-    import harness_demo.gas_trainer_workflow as workflow
+    import harness_core.gas_workflow as workflow
 
     real_evaluate_candidate = workflow.evaluate_candidate
     responses = []

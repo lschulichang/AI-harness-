@@ -1,5 +1,5 @@
 """B、C 回归训练师的白名单参数和候选反馈。"""
-from .planner import OpenAITransport, Planner
+from .llm_client import OpenAITransport, Planner
 
 
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}

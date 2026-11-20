@@ -1,4 +1,4 @@
-"""从项目根目录运行 python -m harness_demo --help。"""
+"""从项目根目录运行 python -m harness_core --help。"""
 
 import argparse
 import json
@@ -7,12 +7,12 @@ from pathlib import Path
 
 from .config import RunConfig
 from .storage import read_json
-from .workflow import run_workflow
+from .runner import run_workflow
 
 
 def parser():
     p = argparse.ArgumentParser(description="智训引擎 Harness：工业数据的批次实验闭环",
-                                epilog="气体格式识别与 DAT 转换：python -m harness_demo.gas_import --help")
+                                epilog="气体格式识别与 DAT 转换：python -m harness_core.gas_import --help")
     sub = p.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="运行或恢复实验")
     run.add_argument("--config", type=Path)

@@ -9,7 +9,7 @@ COPY sdk /opt/contest-harness-sdk
 RUN python3 -m pip install --no-cache-dir -r /opt/harness/requirements.txt /opt/contest-harness-sdk
 
 COPY harness.py contest_submission.py contest_data.py /app/
-COPY harness_demo /app/harness_demo
+COPY harness_core /app/harness_core
 COPY wrappers /app/wrappers
 COPY baseline /app/baseline
 

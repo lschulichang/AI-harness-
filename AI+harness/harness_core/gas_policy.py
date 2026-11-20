@@ -1,7 +1,7 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 import json
 
-from .planner import OpenAITransport, Planner
+from .llm_client import OpenAITransport, Planner
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}

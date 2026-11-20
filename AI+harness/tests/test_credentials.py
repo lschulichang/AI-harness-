@@ -1,4 +1,4 @@
-from harness_demo import credentials
+from harness_core import credentials
 
 
 def test_local_source_key_is_available(monkeypatch):

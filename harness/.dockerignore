@@ -9,8 +9,8 @@
 !sdk/README.md
 !sdk/contest_harness/
 !sdk/contest_harness/*.py
-!harness_demo/
-!harness_demo/*.py
+!harness_core/
+!harness_core/*.py
 !wrappers/
 !wrappers/*.py
 !baseline/

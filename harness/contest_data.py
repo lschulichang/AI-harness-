@@ -9,7 +9,7 @@ import shutil
 import numpy as np
 
 from baseline.gas.baselines.data import flatten
-from harness_demo.storage import atomic_json, read_json
+from harness_core.storage import atomic_json, read_json
 from wrappers.bearing_baseline import BearingBaseline
 from wrappers.cmapss_baseline import CmapssBaseline
 

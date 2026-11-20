@@ -1,10 +1,10 @@
 import json
 
-from harness_demo.bearing_trainer_policy import BearingTrainer
-from harness_demo.bearing_trainer_workflow import choose_candidate, gate_failures
-from harness_demo.config import RunConfig
-from harness_demo.storage import Ledger, read_json
-from harness_demo.workflow import run_workflow
+from harness_core.rul_policy import BearingTrainer
+from harness_core.rul_workflow import choose_candidate, gate_failures
+from harness_core.config import RunConfig
+from harness_core.storage import Ledger, read_json
+from harness_core.runner import run_workflow
 from wrappers.bearing_baseline import digest
 
 

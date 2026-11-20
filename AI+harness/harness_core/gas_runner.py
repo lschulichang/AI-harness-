@@ -7,13 +7,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import project_root
-from .gas_mlp_data import GAS_DATA_DIR, load_gas_model, open_gas_batches
-from .gas_trainer_policy import (
+from .gas_data import GAS_DATA_DIR, load_gas_model, open_gas_batches
+from .gas_policy import (
     WINDOW_DRIFT_BATCHES, WINDOW_POLICY,
     WINDOW_TARGET_BATCHES, WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
 )
-from .gas_trainer_workflow import checked_path, run_trainer_batches
-from .planner import request_usage_known
+from .gas_workflow import checked_path, run_trainer_batches
+from .llm_client import request_usage_known
 from .portability import saved_data_path
 from .storage import Ledger, RunLock, atomic_json, read_json
 from .tracking import Tracker
@@ -252,7 +252,7 @@ def run_gas_mlp(config, *, runs_root=None, resume=None, transport=None, stop_aft
         complete = False
         try:
             project = project_root()
-            sources = sorted(path for folder in (project / "harness_demo", project / "wrappers", bundle / "baselines")
+            sources = sorted(path for folder in (project / "harness_core", project / "wrappers", bundle / "baselines")
                              for path in folder.glob("*.py"))
             code_digest = hashlib.sha256("".join(digest(path) for path in sources).encode()).hexdigest()
             tracker = Tracker(config, root, ledger, metric="macro_f1", run_metadata={

@@ -12,15 +12,15 @@ import numpy as np
 
 from baseline.gas.baselines.model import Model, checkpoint_digest
 
-from .gas_mlp_data import evaluate, evaluate_samples, gas_samples
-from .gas_trainer_drift import detect, label_distribution
-from .workflow import training_window
-from .gas_trainer_metrics import evaluate as trainer_evaluate
-from .gas_trainer_policy import (
+from .gas_data import evaluate, evaluate_samples, gas_samples
+from .gas_drift import detect, label_distribution
+from .runner import training_window
+from .gas_metrics import evaluate as trainer_evaluate
+from .gas_policy import (
     GasTrainer, TRAINING_ACTIONS, WINDOW_DRIFT_BATCHES,
     WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
 )
-from .metrics import BatchMeter
+from .resource_monitor import BatchMeter
 from .portability import resolve_model_path
 from .storage import atomic_json, read_json
 
@@ -47,7 +47,7 @@ def train_candidate(config, parent, output, train, validation, request):
                            for key, value in samples.items() if key in {"x", "y"}})
         atomic_json(work, request)
         response = subprocess.run(
-            [sys.executable, "-B", "-m", "harness_demo.gas_trainer_training",
+            [sys.executable, "-B", "-m", "harness_core.gas_training",
              str(arrays), str(work), str(parent), str(output)],
             cwd=Path(__file__).resolve().parent.parent, env=env,
             capture_output=True, text=True, timeout=config.train_timeout,

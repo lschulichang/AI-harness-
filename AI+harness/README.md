@@ -24,7 +24,7 @@ bash run_linux.sh status 'runs/运行编号'
 bash run_linux.sh run --resume 'runs/运行编号'
 ```
 
-统一 Python 入口是 `run.py`，`python -m harness_demo` 调用同一主函数。启动脚本选择 `/home/adc/anaconda3/envs/AI+harness` 环境。密钥优先读环境变量，其次读 `local_secrets.py`。
+统一 Python 入口是 `run.py`，`python -m harness_core` 调用同一主函数。启动脚本选择 `/home/adc/anaconda3/envs/AI+harness` 环境。密钥优先读环境变量，其次读 `local_secrets.py`。
 
 ## B 轴承剩余寿命回放
 
@@ -64,40 +64,54 @@ C 从 baseline/cpu-c-guide-20261110-v1 的开发检查点出发，按 FD001、FD
 
 完整 batch2 此前用于官方公开验证，其测试成绩标记为开发留出。当前 DAT 训练回放需要真实标签，属于本地留出评估。正式平台入口须按 SDK 契约另行验收。
 
+## 代码命名
+
+主包为 harness_core。gas_* 表示 A 气体分类，rul_* 表示 B 轴承与 C 发动机共用的剩余寿命回归。runner 组织运行，workflow 处理每批闭环，policy 提出和校验训练方案，training 执行训练，metrics 计算模型指标，drift 诊断数据漂移。
+
+llm_client 管理模型请求和预算，resource_monitor 统计运行资源，wrappers 存放具体数据与官方模型适配。
+
 ## 文件职责
 
 ```text
 AI+harness/
 ├── run.py、run_linux.sh           统一运行入口
-├── harness_demo/
+├── harness_core/
 │   ├── __main__.py               命令行
 │   ├── config.py                 当前方案配置
-│   ├── workflow.py               配置校验与恢复入口
-│   ├── gas_mlp.py                模型包核验、运行组织与汇总
-│   ├── gas_trainer_workflow.py    批次闭环、候选反馈与选模
-│   ├── gas_trainer_policy.py      大模型提示词、方案校验、规则兜底
-│   ├── gas_trainer_drift.py       漂移诊断
-│   ├── gas_trainer_training.py    MLP 续训与早停
-│   ├── gas_trainer_metrics.py     全类别诊断指标
-│   ├── gas_mlp_data.py            数据与官方评分对接
-│   ├── gas_import.py              CSV、JSONL、DAT 检查、转换与预测
-│   ├── planner.py                 API 请求、重试与请求预算
-│   ├── storage.py                 SQLite 账本、文件锁与原子保存
-│   ├── tracking.py                SwanLab 日志
-│   ├── metrics.py                 决策耗时、CPU 与内存
-│   ├── portability.py             路径迁移
-│   └── credentials.py             本机密钥读取
-├── wrappers/gas_drift.py          批次读取与固定数据划分
-├── tests/                        当前方案验收
-├── docs/                         开发说明与气体输入格式说明
+│   ├── runner.py                 A/B/C 分发与恢复入口
+│   ├── gas_runner.py             A 运行组织、模型核验与汇总
+│   ├── gas_workflow.py           A 逐批闭环与选模
+│   ├── gas_policy.py             A 提案、参数校验、规则兜底
+│   ├── gas_training.py           A MLP 续训与早停
+│   ├── gas_metrics.py            A 全类别诊断指标
+│   ├── gas_drift.py              A 特征与标签漂移
+│   ├── gas_data.py               A 数据与官方评分对接
+│   ├── gas_import.py             外部气体数据检查、转换与预测
+│   ├── rul_workflow.py           B/C 回归闭环、训练与选模
+│   ├── rul_policy.py             B/C 回归提案与参数校验
+│   ├── feature_drift.py          通用特征漂移计算
+│   ├── llm_client.py             大模型请求、重试与预算
+│   ├── resource_monitor.py       CPU、内存与决策耗时
+│   ├── storage.py                SQLite、运行锁与原子保存
+│   ├── tracking.py               SwanLab 实验记录
+│   ├── portability.py            数据与模型路径处理
+│   └── credentials.py            本机凭证读取
+├── wrappers/
+│   ├── gas_dataset.py            气体批次读取与固定划分
+│   ├── bearing_baseline.py       轴承官方模型适配
+│   ├── bearing_pairs.py          轴承训练／验证配对回放
+│   ├── cmapss_baseline.py         发动机模型与测试数据适配
+│   └── rul_baseline.py           B/C 共用回归适配
+├── tests/                        A/B/C 与公共功能测试
+├── docs/                         开发与输入格式说明
 ├── baseline/                     官方模型包
 ├── data/                         原始数据
-├── runs/                         实验记录、模型和检查点
+├── runs/                         实验结果、模型和检查点
 ├── contest-harness-sdk-1.0.2/     官方 SDK 原包
 ├── scripts/setup_linux.sh         环境安装
 ├── requirements-harness*.txt      依赖
 ├── Dockerfile、.dockerignore      本地容器打包
-└── local_secrets.py               本机配置，排除在 Git 和镜像之外
+└── local_secrets.py               本机凭证配置
 ```
 
 ## 结果与恢复
@@ -120,7 +134,7 @@ AI+harness/
 ```bash
 bash scripts/setup_linux.sh
 PYTHONDONTWRITEBYTECODE=1 /home/adc/anaconda3/envs/AI+harness/bin/python -m pytest tests -q -p no:cacheprovider
-docker build -t harness-demo .
+docker build -t industrial-harness .
 ```
 
 容器的现有 CMD 使用 rules 调试模式。模型包、数据和结果通过挂载提供。正式 SDK 协议见 `contest-harness-sdk-1.0.2/HARNESS_SDK.md`。

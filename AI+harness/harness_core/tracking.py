@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from .credentials import get_secret
-from .planner import request_usage_known
+from .llm_client import request_usage_known
 
 
 class Tracker:

@@ -24,13 +24,13 @@ def run_workflow(config=None, *, runs_root=None, resume=None, transport=None, st
         manifest = read_json(root / "dataset.json")
         dataset = options.get("dataset", "gas_mlp")
         if dataset in {"bearing_rul", "cmapss_rul"}:
-            from .bearing_trainer_workflow import RUL_POLICIES
+            from .rul_workflow import RUL_POLICIES
 
             key, version = RUL_POLICIES[dataset]
             if manifest.get(key, {}).get("version") != version:
                 raise ValueError("当前只恢复对应任务的滑窗运行，旧版运行可用 status 查看")
         else:
-            from .gas_trainer_policy import WINDOW_POLICY
+            from .gas_policy import WINDOW_POLICY
 
             if manifest.get("gas_trainer_policy", {}).get("version") != WINDOW_POLICY:
                 raise ValueError("当前只恢复滑动窗口主线，旧版运行可用 status 查看")
@@ -45,9 +45,9 @@ def run_workflow(config=None, *, runs_root=None, resume=None, transport=None, st
         raise ValueError(f"尚未配置 {config.api_key_env}。请在环境变量或 local_secrets.py 中设置后再运行 llm。")
 
     if config.dataset in {"bearing_rul", "cmapss_rul"}:
-        from .bearing_trainer_workflow import run_rul as run_dataset
+        from .rul_workflow import run_rul as run_dataset
     else:
-        from .gas_mlp import run_gas_mlp as run_dataset
+        from .gas_runner import run_gas_mlp as run_dataset
 
     return run_dataset(config, runs_root=runs_root, resume=resume, transport=transport,
                        stop_after=stop_after, persist_config=no_api_call_limit)

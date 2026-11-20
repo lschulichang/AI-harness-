@@ -18,18 +18,18 @@ from contest_data import (
     BUNDLES, DATASETS, TASK_TYPES, UNITS, ROOT, BearingProjection, CmapssProjection,
     GasProjection, Projection, combine_gas_candidate, sha256_matches, validate_model,
 )
-from harness_demo.bearing_trainer_policy import RulTrainer
-from harness_demo.bearing_trainer_workflow import RUL_POLICIES, checkpoint, run_batch
-from harness_demo.config import RunConfig
-from harness_demo.gas_mlp_data import evaluate_samples, gas_samples
-from harness_demo.gas_trainer_metrics import evaluate as trainer_evaluate
-from harness_demo.gas_trainer_policy import (
+from harness_core.rul_policy import RulTrainer
+from harness_core.rul_workflow import RUL_POLICIES, checkpoint, run_batch
+from harness_core.config import RunConfig
+from harness_core.gas_data import evaluate_samples, gas_samples
+from harness_core.gas_metrics import evaluate as trainer_evaluate
+from harness_core.gas_policy import (
     GasTrainer, WINDOW_DRIFT_BATCHES, WINDOW_POLICY, WINDOW_TARGET_BATCHES,
     WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,
 )
-from harness_demo.gas_trainer_workflow import rolling_drift, run_batch_search
-from harness_demo.storage import Ledger, atomic_json
-from harness_demo.tracking import Tracker
+from harness_core.gas_workflow import rolling_drift, run_batch_search
+from harness_core.storage import Ledger, atomic_json
+from harness_core.tracking import Tracker
 
 
 TASKS = ("classification", "regression")

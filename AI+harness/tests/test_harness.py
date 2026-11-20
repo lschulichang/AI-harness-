@@ -5,12 +5,12 @@ import json
 import numpy as np
 import pytest
 
-from harness_demo.config import RunConfig
-from harness_demo.gas_trainer_policy import WINDOW_TRAINER_CONFIG, validate
-from harness_demo.planner import OpenAITransport, Planner
-from harness_demo.storage import Ledger, read_json
-from harness_demo.tracking import Tracker
-from harness_demo.workflow import run_workflow
+from harness_core.config import RunConfig
+from harness_core.gas_policy import WINDOW_TRAINER_CONFIG, validate
+from harness_core.llm_client import OpenAITransport, Planner
+from harness_core.storage import Ledger, read_json
+from harness_core.tracking import Tracker
+from harness_core.runner import run_workflow
 
 
 def test_split_and_stream_are_reproducible_and_disjoint(dataset, gas_data, tmp_path):
@@ -111,7 +111,7 @@ def test_reserved_request_is_not_reissued(tmp_path):
 
 
 def test_failed_candidate_keeps_model_and_continues(dataset, tmp_path, monkeypatch):
-    import harness_demo.gas_trainer_workflow as workflow
+    import harness_core.gas_workflow as workflow
 
     def fail(*args):
         raise RuntimeError("simulated training failure")
@@ -245,7 +245,7 @@ def test_invalid_action_or_zero_window_is_repaired_before_training(dataset, tmp_
 
 
 def test_rule_fallback_uses_dynamic_target_and_keeps_small_batches():
-    from harness_demo.gas_trainer_policy import rules
+    from harness_core.gas_policy import rules
 
     context = {
         "performance": {"current": {"macro_f1": .9}},

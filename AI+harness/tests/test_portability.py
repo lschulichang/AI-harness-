@@ -2,10 +2,10 @@ import shutil
 
 import pytest
 
-from harness_demo.config import RunConfig
-from harness_demo.portability import resolve_model_path, saved_data_path
-from harness_demo.storage import atomic_json, read_json
-from harness_demo.workflow import run_workflow
+from harness_core.config import RunConfig
+from harness_core.portability import resolve_model_path, saved_data_path
+from harness_core.storage import atomic_json, read_json
+from harness_core.runner import run_workflow
 
 
 def test_project_data_is_saved_as_relative_path(tmp_path):
@@ -32,7 +32,7 @@ def test_windows_model_separator_and_escape_check(tmp_path):
 
 
 def test_moved_window_run_resumes_saved_config_without_retraining(tmp_path, monkeypatch, official_bundle, dataset):
-    import harness_demo.gas_mlp as workflow
+    import harness_core.gas_runner as workflow
 
     project = tmp_path / "AI+harness"
     shutil.copytree(official_bundle, project / "baseline/gas")
