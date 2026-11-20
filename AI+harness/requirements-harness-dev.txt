@@ -1,0 +1,2 @@
+-r requirements-harness.txt
+pytest==9.2.0

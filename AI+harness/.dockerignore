@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements-harness.txt
+!harness_demo/
+!harness_demo/**
+!wrappers/
+!wrappers/**
+!run.py
+**/__pycache__/**
+**/*.pyc
+/local_secrets.py

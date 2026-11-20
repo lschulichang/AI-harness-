@@ -1,0 +1,7 @@
+# Python 3.11；已在本机 harness Conda 环境安装并验收。
+openai==3.46.0
+scikit-learn==1.9.1
+numpy==2.4.6
+scipy==1.17.1
+swanlab==0.10.4
+psutil==7.2.2

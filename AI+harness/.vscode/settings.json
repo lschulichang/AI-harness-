@@ -1,0 +1,7 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "explorer.sortOrder": "default",
+    "explorer.sortOrderReverse": true,
+    "python.defaultInterpreterPath": "/home/adc/anaconda3/envs/AI+harness/bin/python"
+}

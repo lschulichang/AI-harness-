@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.test_artifacts*/
+.test_targeted/
+*.pyc
+.env
+.env.*
+!.env.example
+data/
+runs/
+swanlog/
+/local_secrets.py
+.conda/
+.validation/
