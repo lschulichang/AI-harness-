@@ -1,35 +1,65 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 
+import json
+
 from .llm_client import OpenAITransport, Planner
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
-WINDOW_POLICY = "trainer_window_v4"
-WINDOW_DRIFT_BATCHES = 3
-WINDOW_VALIDATION_BATCHES = 6
-WINDOW_TARGET_BATCHES = 4
+WINDOW_POLICY = "trainer_window_v4"  # 决定训练时的数据批次数量
+WINDOW_DRIFT_BATCHES = 3  # 漂移检测批次数量
+WINDOW_VALIDATION_BATCHES = 6  # 在旧数据上验证批次数量
+WINDOW_TARGET_BATCHES = 4  # 求训练目标所用的批次数量
 
 WINDOW_TRAINER_CONFIG = {
-    "drift": {"bins": 10, "psi_warning": 0.1, "ks_fdr": 0.05,
-              "mmd_samples": 300, "mmd_permutations": 99,
-              "label_js_warning": 0.05, "min_samples": 80},
-    "training": {"learning_rate": 0.0003, "batch_size": 64, "epochs": 20,
-                 "early_stopping_patience": 5, "weight_decay": 0.0001,
-                 "class_weighting": False, "window_size": 4},
-    "limits": {"learning_rate": [1e-6, 0.01], "batch_size": [8, 512],
-               "epochs": [1, 50], "early_stopping_patience": [1, 15],
-               "weight_decay": [0, 0.01], "window_size": [1, 8]},
+    "drift": {
+        "bins": 10,
+        "psi_warning": 0.1,
+        "ks_fdr": 0.05,
+        "mmd_samples": 300,
+        "mmd_permutations": 99,
+        "label_js_warning": 0.05,
+        "min_samples": 80,
+    },
+    "training": {
+        "learning_rate": 0.0003,
+        "batch_size": 64,
+        "epochs": 20,
+        "early_stopping_patience": 5,
+        "weight_decay": 0.0001,
+        "class_weighting": False,
+        "window_size": 4,
+    },
+    "limits": {
+        "learning_rate": [1e-6, 0.01],
+        "batch_size": [8, 512],
+        "epochs": [1, 50],
+        "early_stopping_patience": [1, 15],
+        "weight_decay": [0, 0.01],
+        "window_size": [1, 8],
+    },
 }
 
 
 def validate(raw, cfg, *, require_complete=False):
-    if not isinstance(raw, dict) or set(raw) != {"decision", "reason", "training_config", "evaluation_requirements"}:
+    if not isinstance(raw, dict) or set(raw) != {
+        "decision",
+        "reason",
+        "training_config",
+        "evaluation_requirements",
+    }:
         raise ValueError("decision must have exactly the required JSON keys")
-    if (not isinstance(raw["decision"], str) or raw["decision"] not in DECISIONS
-            or not isinstance(raw["reason"], str) or not raw["reason"].strip()):
+    if (
+        not isinstance(raw["decision"], str)
+        or raw["decision"] not in DECISIONS
+        or not isinstance(raw["reason"], str)
+        or not raw["reason"].strip()
+    ):
         raise ValueError("invalid decision or reason")
     requirements = raw["evaluation_requirements"]
-    if not isinstance(requirements, list) or not all(isinstance(value, str) for value in requirements):
+    if not isinstance(requirements, list) or not all(
+        isinstance(value, str) for value in requirements
+    ):
         raise ValueError("invalid evaluation requirements")
     supplied = raw["training_config"]
     training_keys = cfg["training"].keys()
@@ -40,11 +70,17 @@ def validate(raw, cfg, *, require_complete=False):
             raise ValueError("nontraining decision must have empty training_config")
         return raw
     if require_complete and set(supplied) != training_keys:
-        raise ValueError("training_config must explicitly contain every training parameter")
+        raise ValueError(
+            "training_config must explicitly contain every training parameter"
+        )
     config = {**cfg["training"], **supplied}
     for key, (lower, upper) in cfg["limits"].items():
         value = config[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not lower <= value <= upper:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not lower <= value <= upper
+        ):
             raise ValueError(f"{key} is outside configured bounds")
     for key in ("batch_size", "epochs", "early_stopping_patience", "window_size"):
         if type(config[key]) is not int:
@@ -66,18 +102,37 @@ def rules(context, cfg):
     target = context.get("validation_target")
     stable = target is not None and current["macro_f1"] >= target
     if context["data"]["new_labeled_samples"] < cfg["drift"]["min_samples"]:
-        decision, reason = "NO_UPDATE", "Insufficient labeled samples; keep the current model"
+        decision, reason = (
+            "NO_UPDATE",
+            "Insufficient labeled samples; keep the current model",
+        )
     elif stable and len(context["drift_report"]["drifted_features"]) < 20:
         decision, reason = "NO_UPDATE", "Current performance is stable"
     elif context["data"]["historical_replay_available"]:
-        decision, reason = "MIXED_DATA_TRAINING", "Drift or performance decline; historical replay exists"
+        decision, reason = (
+            "MIXED_DATA_TRAINING",
+            "Drift or performance decline; historical replay exists",
+        )
     else:
-        decision, reason = "INCREMENTAL_TRAINING", "Drift or performance decline; replay unavailable"
-    return validate({
-        "decision": decision, "reason": reason,
-        "training_config": dict(cfg["training"]) if decision in TRAINING_ACTIONS else {},
-        "evaluation_requirements": ["new_data_macro_f1", "recent_history_macro_f1_drop", "per_class_recall"],
-    }, cfg)
+        decision, reason = (
+            "INCREMENTAL_TRAINING",
+            "Drift or performance decline; replay unavailable",
+        )
+    return validate(
+        {
+            "decision": decision,
+            "reason": reason,
+            "training_config": dict(cfg["training"])
+            if decision in TRAINING_ACTIONS
+            else {},
+            "evaluation_requirements": [
+                "new_data_macro_f1",
+                "recent_history_macro_f1_drop",
+                "per_class_recall",
+            ],
+        },
+        cfg,
+    )
 
 
 WINDOW_PROMPT = (
@@ -102,8 +157,14 @@ def compact_input(context, cfg):
     def brief(metrics):
         if metrics is None:
             return None
-        return {"accuracy": round(metrics["accuracy"], 4), "macro_f1": round(metrics["macro_f1"], 4),
-                "recall": {name: round(value["recall"], 3) for name, value in metrics["per_class"].items()}}
+        return {
+            "accuracy": round(metrics["accuracy"], 4),
+            "macro_f1": round(metrics["macro_f1"], 4),
+            "recall": {
+                name: round(value["recall"], 3)
+                for name, value in metrics["per_class"].items()
+            },
+        }
 
     drift = context["drift_report"]
     return {
@@ -114,19 +175,25 @@ def compact_input(context, cfg):
             "mmd_squared": (drift["mmd"] or {}).get("mmd_squared"),
             "label_js": drift["label_js_divergence"],
             "label_status": drift.get("label_status"),
-            "status": drift["status"], "reference_batches": drift["reference_batches"],
+            "status": drift["status"],
+            "reference_batches": drift["reference_batches"],
         },
         "current_validation": brief(context["performance"]["current"]),
         "new_rows": context["data"]["new_labeled_samples"],
         "replay_available": context["data"]["historical_replay_available"],
         "replay_batches": context["data"]["replay_batches"],
         "recent_history": [
-            {"batch": row["batch"], "decision": row["decision"], "deployed": row["deployed"],
-             "macro_f1_gain": round(row["macro_f1_gain"], 4),
-             "drifted_feature_count": row["drifted_feature_count"]}
+            {
+                "batch": row["batch"],
+                "decision": row["decision"],
+                "deployed": row["deployed"],
+                "macro_f1_gain": round(row["macro_f1_gain"], 4),
+                "drifted_feature_count": row["drifted_feature_count"],
+            }
             for row in context["history"][:3]
         ],
-        "training_defaults": cfg["training"], "training_limits": cfg["limits"],
+        "training_defaults": cfg["training"],
+        "training_limits": cfg["limits"],
     }
 
 
@@ -160,29 +227,53 @@ class GasTrainer(Planner):
                 )
         decision, error = None, ""
         if self.config.strategy == "llm":
+
             def check(value):
                 decision = validate(value, cfg, require_complete=True)
-                if decision["decision"] == "MIXED_DATA_TRAINING" and not payload["replay_available"]:
+                if (
+                    decision["decision"] == "MIXED_DATA_TRAINING"
+                    and not payload["replay_available"]
+                ):
                     raise ValueError("mixed training requires replay samples")
                 previous_count = len(payload.get("replay_batches", ()))
                 if decision["decision"] in TRAINING_ACTIONS and any(
-                        effective_params(decision["training_config"], previous_count)
-                        == effective_params(attempt["training_config"], previous_count) for attempt in attempts):
-                    raise ValueError("this training configuration has already been tried in the current batch")
+                    effective_params(decision["training_config"], previous_count)
+                    == effective_params(attempt["training_config"], previous_count)
+                    for attempt in attempts
+                ):
+                    raise ValueError(
+                        "this training configuration has already been tried in the current batch"
+                    )
                 return decision
 
             decision, error = self._request_proposal(
-                key, prompt, payload, check, output_budget=self.config.max_api_output_tokens)
+                key,
+                prompt,
+                payload,
+                check,
+                output_budget=self.config.max_api_output_tokens,
+            )
         if decision is None:
             if attempts:
-                decision = {"decision": "NO_UPDATE", "reason": "反馈请求未得到有效方案，结束本批搜索",
-                            "training_config": {}, "evaluation_requirements": []}
+                decision = {
+                    "decision": "NO_UPDATE",
+                    "reason": "反馈请求未得到有效方案，结束本批搜索",
+                    "training_config": {},
+                    "evaluation_requirements": [],
+                }
             else:
                 decision = rules(context, cfg)
             source = "rules_fallback" if self.config.strategy == "llm" else "rules"
         else:
             source = "trainer_llm"
-        result = {"input": payload, "output": decision, "metadata": {
-            "source": source, "fallback": source == "rules_fallback", "error": error or None}}
+        result = {
+            "input": payload,
+            "output": decision,
+            "metadata": {
+                "source": source,
+                "fallback": source == "rules_fallback",
+                "error": error or None,
+            },
+        }
         self.ledger.put("trainer_decision", key, result)
         return result
