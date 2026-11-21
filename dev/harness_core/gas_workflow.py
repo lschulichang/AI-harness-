@@ -28,19 +28,25 @@ from .runner import training_window
 from .storage import atomic_json, read_json
 
 
+# 找到检查点
 def checked_path(root, entry):
     path = resolve_model_path(root, entry["model_path"])
     if checkpoint_digest(path) != entry["checkpoint_sha256"]:
         raise ValueError("气体模型检查点摘要不匹配")
     return path
 
-
+#启动一次 A 气体分类候选模型的训练
 def train_candidate(config, parent, output, train, validation, request):
     output.parent.mkdir(exist_ok=True)
-    env = {
-        name: value for name, value in os.environ.items()
-        if name not in {config.api_key_env, "PYTHONPATH"} and not name.endswith("_API_KEY")
-    }
+    env = os.environ.copy()
+    for key in (
+        config.api_key_env,
+        "PYTRIO_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "SWANLAB_API_KEY",
+        "PYTHONPATH",
+    ):
+        env.pop(key, None)
     env.update(
         BASELINE_CPU_THREADS="1",
         OPENBLAS_NUM_THREADS="1",
