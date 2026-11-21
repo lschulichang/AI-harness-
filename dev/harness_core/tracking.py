@@ -65,7 +65,7 @@ class Tracker:
         fields = (
             "batch", "source", "status", "params", "stage", "training_batches", "train_rows",
             "parent_checkpoint_sha256", "checkpoint_sha256", "training_seconds", "attempt_seconds",
-            "sample_passes", "history_drop", "history_validation", "current_relative_gain",
+            "sample_passes", "epochs_run", "best_epoch", "history_drop", "history_validation", "current_relative_gain",
             "error_type", f"history_{self.metric}",
         )
         details = {key: trial[key] for key in fields if trial.get(key) is not None}
@@ -95,7 +95,7 @@ class Tracker:
         values = {"batch/id": batch, "batch/experiment_count": result["experiment_count"]}
         fields = (
             f"before_validation_{self.metric}", f"validation_{self.metric}",
-            "static_validation_rmse", "static_validation_mae", "before_validation_mae", "validation_mae",
+            "before_validation_mae", "validation_mae",
             "max_history_relative_increase", "validation_target_rmse",
             f"before_test_{self.metric}", f"test_{self.metric}",
             "before_test_accuracy", "test_accuracy",
@@ -157,8 +157,8 @@ class Tracker:
             f"mean_before_test_{metric}", f"mean_test_{metric}",
             f"worst_before_test_{metric}", f"worst_test_{metric}",
             "mean_before_test_accuracy", "mean_test_accuracy",
-            "mean_static_validation_rmse", "mean_before_validation_rmse", "mean_validation_rmse",
-            "worst_validation_rmse", "mean_static_validation_mae", "mean_before_validation_mae",
+            "mean_before_validation_rmse", "mean_validation_rmse",
+            "worst_validation_rmse", "mean_before_validation_mae",
             "mean_validation_mae", "max_history_relative_increase",
             "experiments", "accepted_models", "failed_stages",
             "training_sample_passes", "training_seconds", "total_decision_seconds",

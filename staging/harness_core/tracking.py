@@ -64,7 +64,7 @@ class Tracker:
         fields = (
             "batch", "source", "status", "params", "stage", "training_batches", "train_rows",
             "parent_checkpoint_sha256", "checkpoint_sha256", "training_seconds", "attempt_seconds",
-            "sample_passes", "history_drop", "history_validation", "current_relative_gain",
+            "sample_passes", "epochs_run", "best_epoch", "history_drop", "history_validation", "current_relative_gain",
             "error_type", f"history_{self.metric}",
         )
         details = {key: trial[key] for key in fields if trial.get(key) is not None}
@@ -94,7 +94,7 @@ class Tracker:
         values = {"batch/id": batch, "batch/experiment_count": result["experiment_count"]}
         fields = (
             f"before_validation_{self.metric}", f"validation_{self.metric}",
-            "static_validation_rmse", "static_validation_mae", "before_validation_mae", "validation_mae",
+            "before_validation_mae", "validation_mae",
             "max_history_relative_increase", "validation_target_rmse",
             f"before_test_{self.metric}", f"test_{self.metric}",
             "before_test_accuracy", "test_accuracy",

@@ -15,7 +15,7 @@ from .gas_drift import detect, label_distribution
 from .gas_policy import TRAINING_ACTIONS, WINDOW_TRAINER_CONFIG
 from .history_evaluation import gas_references, gas_scores
 from .portability import resolve_model_path
-from .runner import training_window
+from .runner import candidate_feedback, training_window
 from .storage import atomic_json, read_json
 
 
@@ -87,7 +87,7 @@ def evaluate_candidate(config, root, parent_model, output, request, train_rows, 
         raise ValueError("训练产物与大模型决策、训练起点或标准化状态不一致")
     score = evaluate_samples(path, validation)
     if measure_candidate is not None:
-        score = measure_candidate(output, score)
+        score = measure_candidate(output, score, report)
     gain = score["macro_f1"] - current["macro_f1"]
     history_scores = gas_scores(path, history)
     worst = max(history_scores, key=lambda item: item["drop"], default=None)
@@ -142,7 +142,8 @@ def run_batch_trial(config, root, ledger, tracker, batch, key, active, entry_pat
         decision["scope"] = "candidate_eligibility"
     ledger.put("proposal", key, {"source": source, "params": params,
                "hypothesis": trainer_decision["output"]["reason"], "fallback_reason": metadata["error"]})
-    def measure(directory, local_score):
+    def measure(directory, local_score, report):
+        trial["sample_passes"] = n_train * report["epochs_run"]
         return measure_candidate(directory, local_score, trainer_decision, request["seed"], training_batches)
 
     started = time.perf_counter()
@@ -275,10 +276,12 @@ def run_batch_search(config, root, ledger, tracker, planner, batch, entry, entry
             "validation_accuracy": trial.get("accuracy"), "current_gain": decision.get("gain"),
             "worst_historical_group": max(decision.get("history_validation", ()),
                                           key=lambda row: row["drop"], default=None),
-            "eligible": decision["eligible"], "reason": decision["reason"],
-            "error_type": trial.get("error_type"), "sample_passes": trial["sample_passes"],
+            "eligible": decision["eligible"], "error_type": trial.get("error_type"),
         })
         attempts[-1].update(training_batches=trial["training_batches"], train_rows=trial["train_rows"])
+        attempts[-1].update(candidate_feedback(
+            trial, decision, ("macro_f1", "accuracy"), can_fallback="fallback_candidate" in decision,
+        ))
         if allow_best_below_target:
             attempts[-1]["fallback_eligible"] = "fallback_candidate" in decision
         if decision["eligible"] and (best is None or decision["gain"] > best["gain"]):

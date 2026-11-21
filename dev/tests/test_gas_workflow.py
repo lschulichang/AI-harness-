@@ -61,6 +61,7 @@ def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, m
     first, second = payloads[:2]
     assert "historical_validation" not in first and not first["replay_batches"]
     assert first["drift"]["status"] == "no_reference" and first["drift"]["mmd_p"] is None
+    assert first["new_rows"] == len(dataset.load(1, "train")[1])
     assert all("historical_validation" not in payload and "historical_validation_batch" not in payload
                for payload in payloads)
     assert second["drift"]["reference_batches"] == second["replay_batches"] == ["batch2.dat"]
@@ -178,6 +179,8 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     assert "min_current_macro_f1_gain" not in feedback
     assert feedback["attempts"][0]["training_config"] == {**params, "window_size": 3}
     assert feedback["attempts"][0]["eligible"]
+    assert feedback["attempts"][0]["selection_status"] == "达到优先门槛"
+    assert set(feedback["attempts"][0]["validation_metrics"]) == {"macro_f1", "accuracy"}
     assert "worst_historical_group" not in feedback["attempts"][0]
     assert "test" not in json.dumps(payloads)
 

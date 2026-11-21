@@ -13,12 +13,13 @@ def open_gas_batches(path, seed, *, model_meta=None):
 
 
 def evaluate_samples(model_path, samples):
-    from baseline.gas.baselines.train import metrics
+    from .gas_metrics import evaluate as evaluate_model
 
     model = load_gas_model(model_path)
     if "paths" in samples and samples["paths"] != model.meta["paths"]:
         raise ValueError("公开验证特征与检查点不一致")
-    return metrics(model, samples)
+    score = evaluate_model(model, samples)
+    return {key: score[key] for key in ("macro_f1", "accuracy")}
 
 
 def gas_samples(data, batch, split):

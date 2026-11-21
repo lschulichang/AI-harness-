@@ -1,4 +1,4 @@
-"""Evaluate the classes declared by the checkpoint, including classes with zero support."""
+"""Evaluate Macro-F1 over the classes present in validation ground truth."""
 import time
 
 import numpy as np
@@ -20,7 +20,7 @@ def evaluate(model, data):
     class_ids = np.arange(len(classes))
     p, r, f, support = precision_recall_fscore_support(y, pred, labels=class_ids, zero_division=0)
     return {"samples": len(y), "accuracy": float(accuracy_score(y, pred)),
-            "macro_f1": float(f1_score(y, pred, labels=class_ids, average="macro", zero_division=0)),
+            "macro_f1": float(np.mean(f[support > 0])),
             "weighted_f1": float(f1_score(y, pred, labels=class_ids, average="weighted", zero_division=0)),
             "per_class": {name: {"precision": float(p[i]), "recall": float(r[i]),
                                   "f1": float(f[i]), "support": int(support[i])}

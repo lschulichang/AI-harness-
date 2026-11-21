@@ -1,5 +1,6 @@
 """Train or continue a CPU baseline from public train/validation JSONL only."""
 import argparse
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import os
@@ -38,7 +39,8 @@ def metrics(model, data):
 
 
 def train_run(profile, train_path, validation_path, output, *, resume=None, epochs=None,
-              learning_rate=None, batch_size=None, seed=None, stage_id="baseline", label_provenance=None):
+              learning_rate=None, batch_size=None, seed=None, stage_id="baseline", label_provenance=None,
+              early_stopping_patience=None):
     output = Path(output)
     if output.exists() or output.is_symlink():
         raise ValueError("output must be a new directory; previous rounds are never overwritten")
@@ -92,14 +94,27 @@ def train_run(profile, train_path, validation_path, output, *, resume=None, epoc
     count = config["epochs"] if epochs is None else epochs
     if type(count) is not int or not 1 <= count <= 10000:
         raise ValueError("epochs must be in 1..10000")
+    if early_stopping_patience is not None and (
+            config["task"] != "regression" or type(early_stopping_patience) is not int
+            or early_stopping_patience < 1):
+        raise ValueError("early stopping requires regression and a positive integer patience")
     initial_steps, initial_epochs = model.meta["steps"], model.meta["epochs"]
     validation_before = metrics(model, validation)
     started = time.monotonic()
     records = []
-    for _ in range(count):
+    best_model, best_score, best_epoch = None, float("inf"), count
+    for epoch in range(1, count + 1):
         loss = model.fit(train["x"], train["y"], 1)[0]
+        scores = metrics(model, validation)
         records.append({"epoch": model.meta["epochs"], "step": model.meta["steps"], "loss": loss,
-                        "validation": metrics(model, validation)})
+                        "validation": scores})
+        if early_stopping_patience is not None:
+            if scores["rmse"] < best_score - 1e-8:
+                best_model, best_score, best_epoch = deepcopy(model), scores["rmse"], epoch
+            elif epoch - best_epoch >= early_stopping_patience:
+                break
+    if best_model is not None:
+        model = best_model
     duration = time.monotonic() - started
     if not records:
         raise ValueError("at least one training epoch is required")
@@ -119,7 +134,9 @@ def train_run(profile, train_path, validation_path, output, *, resume=None, epoc
                   "checkpoint_sha256": checkpoint_digest(checkpoint), "initial_steps": initial_steps,
                   "initial_epochs": initial_epochs, "final_steps": model.meta["steps"], "final_epochs": model.meta["epochs"],
                   "training_seconds": duration, "learning_rate": model.meta["learning_rate"], "batch_size": model.meta["batch_size"],
-                  "validation_before": validation_before, "validation_after": records[-1]["validation"],
+                  "validation_before": validation_before, "validation_after": records[best_epoch - 1]["validation"],
+                  "epochs_run": len(records), "best_epoch": best_epoch,
+                  "early_stopping_patience": early_stopping_patience,
                   "configuration": {"hidden": model.meta["hidden"], "activation": "tanh", "optimizer": "Adam",
                       "adam_beta1": .9, "adam_beta2": .999, "adam_epsilon": 1e-8, "gradient_clip_norm": 5.0,
                       "feature_clip": [-10.0, 10.0], "normalization": "initial_training_mean_std",
@@ -148,6 +165,7 @@ def main():
     continuation.add_argument("--resume", help="Previous round checkpoint; preserve weights, Adam, normalization and epoch")
     continuation.add_argument("--from-baseline", help="Official/reference starting checkpoint; identical continuation semantics")
     parser.add_argument("--epochs", type=int)
+    parser.add_argument("--early-stopping-patience", type=int)
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--seed", type=int)
@@ -158,7 +176,8 @@ def main():
         parser.error("epochs must be in 1..10000")
     report = train_run(args.profile, args.train, args.validation, args.output, resume=args.resume or args.from_baseline,
         epochs=args.epochs, learning_rate=args.learning_rate, batch_size=args.batch_size, seed=args.seed,
-        stage_id=args.stage_id, label_provenance=args.label_provenance)
+        stage_id=args.stage_id, label_provenance=args.label_provenance,
+        early_stopping_patience=args.early_stopping_patience)
     print(json.dumps(report, ensure_ascii=False, allow_nan=False))
 
 

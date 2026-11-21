@@ -141,7 +141,7 @@ class GasTrainer(Planner):
             attempts = feedback["attempts"]
             prompt += (
                 " Each decision requests at most one candidate. All candidates start from the same batch-entry model. "
-                "Review batch_feedback for actual validation, gate failures and remaining budgets. "
+                "Review batch_feedback for actual validation, selection status, gate failures, sample passes and remaining budgets. "
                 "If another distinct configuration is worth trying, return a training decision with changed parameters. "
                 "Otherwise return NO_UPDATE to finish; the best eligible candidate so far will still be adopted."
             )

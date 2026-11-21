@@ -3,7 +3,6 @@
 import gzip
 import json
 import math
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -67,7 +66,7 @@ def checked_rows(rows, model, split):
 class Projection:
     """Public rows retained only for the original replay and validation windows."""
 
-    def __init__(self, rnd, state, model, parent):
+    def __init__(self, rnd, state, model):
         self.state = state
         self.key = rnd.dataset_key
         self.batch = rnd.round_index - 1
@@ -81,8 +80,6 @@ class Projection:
             self.names = {row["batch"]: row["source_file"] for row in self.history}
         elif self.batch == 0:
             self.history, self.names = [], {}
-            if self.key != "A":
-                shutil.copyfile(parent, state / "static.npz")
         else:
             raise ValueError("平台未挂载上一轮的滑窗状态")
 

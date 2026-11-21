@@ -15,11 +15,11 @@ def isolate_local_secrets(monkeypatch):
 
 @pytest.fixture(scope="session")
 def gas_data():
-    def create(root):
+    def create(root, batch_rows=100):
         root.mkdir(parents=True, exist_ok=True)
         rng = np.random.default_rng(42)
         for batch, name in enumerate(GasDriftData.batch_names):
-            size = 250 if batch == 0 else 100
+            size = 250 if batch == 0 else batch_rows
             x = rng.standard_normal((size, 2))
             direction = -1 if batch >= 4 else 1
             y = 1 + (direction * x[:, 0] + .4 * x[:, 1] > 0).astype(int)
@@ -33,6 +33,11 @@ def gas_data():
 @pytest.fixture(scope="session")
 def dataset(tmp_path_factory, gas_data):
     return gas_data(tmp_path_factory.mktemp("gas_batches"))
+
+
+@pytest.fixture(scope="session")
+def fallback_dataset(tmp_path_factory, gas_data):
+    return gas_data(tmp_path_factory.mktemp("gas_fallback_batches"), batch_rows=140)
 
 
 @pytest.fixture(scope="session")

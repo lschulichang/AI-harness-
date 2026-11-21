@@ -5,7 +5,8 @@ from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 LIMITS = {"learning_rate": (1e-6, 0.01), "batch_size": (8, 512),
           "epochs": (1, 50)}
-DEFAULTS = {"learning_rate": 0.001, "batch_size": 128, "epochs": 5}
+DEFAULTS = {"learning_rate": 0.001, "batch_size": 128, "epochs": 5,
+            "early_stopping_patience": 5}
 SYSTEM = (
     "current_validation 始终是本批入口模型的验证指标，不能当作任何候选的结果。"
     "batch_feedback.attempts 为空时意味着本批尚未试训，不能据此判定续训没有收益或没有通过选模门槛。"
@@ -14,11 +15,13 @@ SYSTEM = (
     "每次提案只训练一个候选，都从同一批初模型出发，只使用当前和已开放的训练数据。"
     "仅返回简洁 JSON，字段为 decision、reason、training_config。"
     "动作可为 NO_UPDATE、INCREMENTAL_TRAINING、MIXED_DATA_TRAINING。"
+    "epochs 是每个候选的训练上限。可选 early_stopping_patience 取 1 至 15，默认 5，"
+    "根据当前批验证 RMSE 早停并保留最佳轮次。"
     "跳过或停止时 training_config 为 {}；训练须给出 learning_rate、batch_size、epochs。不要返回 window_size。"
     f"仅本批续训使用当前批。混合续训时，程序固定使用本批和最多最近 {MIXED_TRAINING_WINDOW - 1} 批历史训练数据。没有历史时不能选混合续训。"
 )
 FEEDBACK = (
-    " 本批已有候选结果。查看当前批验证结果和剩余预算。"
+    " 本批已有候选结果。查看验证指标、判定原因、实际样本遍历量和剩余预算。"
     "如有值得尝试的不同配置，可以继续；返回 NO_UPDATE 时只结束搜索，程序仍会采用已有的最佳合格候选。"
     "若有当前验证目标，优先达到该 RMSE；未达目标时，程序仍可采用在当前验证集上优于批初模型的候选。"
 )
@@ -60,7 +63,7 @@ def validate(proposal, history_count):
         if params:
             raise ValueError("保留模型时训练参数必须为空")
         return proposal
-    if set(params) - {"window_size"} != LIMITS.keys():
+    if set(params) - {"window_size", "early_stopping_patience"} != LIMITS.keys():
         raise ValueError("训练配置不符合 RUL 白名单")
     for name, (low, high) in LIMITS.items():
         value = params[name]
@@ -72,7 +75,11 @@ def validate(proposal, history_count):
         raise ValueError("旧窗口字段无效")
     if action == "MIXED_DATA_TRAINING" and not history_count:
         raise ValueError("混合训练须有历史数据")
-    return {**proposal, "training_config": {**params, "window_size": window_size_for_action(action)}}
+    patience = params.get("early_stopping_patience", DEFAULTS["early_stopping_patience"])
+    if type(patience) is not int or not 1 <= patience <= 15:
+        raise ValueError("early_stopping_patience 超出允许范围")
+    return {**proposal, "training_config": {**params, "early_stopping_patience": patience,
+                                            "window_size": window_size_for_action(action)}}
 
 
 class RulTrainer(Planner):

@@ -32,7 +32,7 @@ bash run_linux.sh run --dataset bearing_rul --strategy llm --max-api-calls 9 --m
 
 B 从原始检查点启动。三批训练与验证轴承分别为 Bearing1_4 → Bearing1_5、Bearing2_5 → Bearing2_4、Bearing3_4 → Bearing3_5。每根轴承使用完整快照。默认目录为 data/bearing_rul_replay，批次见其中的 replay.json。可用 --data-dir 指定另一份相同协议的配对数据，用 --baseline-dir 指定匹配的基线包。提示词使用回归指标和训练特征漂移摘要。仅本批续训用当前批，混合续训固定用当前批和最近两批历史训练样本。漂移参考取最近 3 批。所有候选从本批入口模型续训。
 
-B 按分钟计算 RMSE 和 MAE。模型在试训前看到批初模型的验证分数、漂移与可用样本，可以决定是否尝试。试训后的结果才用于选模。首批默认要求 RMSE 比批初至少降低 1%。后续以最近 4 批批末 RMSE 均值为优先目标，候选须优于批初模型。若均未达到目标，仍可选最好的合格改善候选。首批增益阈值可通过 JSON 配置的 `rul_min_relative_gain` 设置。开启历史回测后，最近最多 6 个历史工况的 RMSE 对照写入实验记录。每个运行的 `batch_results.md` 列出同一验证集上的静态基线、批初与选中模型指标。初始检查点已使用全部公开训练轴承，公开验证结果用于本地回放选模。
+B 按分钟计算 RMSE 和 MAE。模型在试训前看到批初模型的验证分数、漂移与可用样本，可以决定是否尝试。试训后的结果才用于选模。首批默认要求 RMSE 比批初至少降低 1%。后续以最近 4 批批末 RMSE 均值为优先目标，候选须优于批初模型。若均未达到目标，仍可选最好的合格改善候选。首批增益阈值可通过 JSON 配置的 `rul_min_relative_gain` 设置。开启历史回测后，最近最多 6 个历史工况的 RMSE 对照写入实验记录。每个运行的 `batch_results.md` 列出同一验证集上的批初与选中模型指标。初始检查点已使用全部公开训练轴承，公开验证结果用于本地回放选模。
 
 ## C 涡扇发动机剩余寿命回放
 
@@ -41,7 +41,7 @@ bash run_linux.sh run --dataset cmapss_rul --strategy rules --swanlab-mode disab
 bash run_linux.sh run --dataset cmapss_rul --strategy llm --provider pytrio --max-api-calls 12 --max-experiments 12 --swanlab-mode offline
 ~~~
 
-C 从 baseline/cpu-c-guide-20261110-v1 的开发检查点出发，按 FD001、FD002、FD003、FD004 回放。训练和验证沿用基线包按整台发动机划分的公开文件，输入是 3 项运行设置和 21 项传感器值。初始检查点已使用过全部公开训练轨迹，所以这是开发回放。C 与 B 共用滑窗、候选反馈和基于当前批验证的选模规则。RMSE 和 MAE 以循环数计。
+C 从 baseline/cpu-c-guide-20261110-v1 的开发检查点出发，按 FD001、FD002、FD003、FD004 回放。训练和验证沿用基线包按整台发动机划分的公开文件，输入是 3 项运行设置和 21 项传感器值。初始检查点已使用过全部公开训练轨迹，所以这是开发回放。C 与 B 共用滑窗、候选反馈和基于当前批验证的选模规则。二者按当前批 RMSE 早停，默认连续 5 轮未改善时停止，保留最佳轮次。RMSE 和 MAE 以循环数计。
 
 全部批次选模结束后，使用 data/CMAPSSData 下的 test_FD00x.txt 和 RUL_FD00x.txt 测试静态基线与最终模型。每台测试发动机只评估其最后可见循环。NASA 分数按样本累计，越低越好。公开测试结果写入 summary.json 和 batch_results.md，供本地比较。--data-dir 可指定 NASA 原始测试数据目录，--baseline-dir 可指定兼容的 C 基线包。
 

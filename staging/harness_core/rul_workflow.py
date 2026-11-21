@@ -13,7 +13,7 @@ from .feature_drift import detect_features
 from .history_evaluation import history_batches, rul_references, rul_scores
 from .portability import resolve_model_path
 from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults
-from .runner import training_window
+from .runner import candidate_feedback, training_window
 from .storage import read_json
 
 POLICY = "bearing_window_v2"
@@ -69,6 +69,8 @@ def train_candidate(config, adapter, parent, output, key, params, inputs):
                "--train", str(inputs[0]), "--validation", str(inputs[1]), "--resume", str(parent),
                "--output", str(output), "--stage-id", key, "--learning-rate", str(params["learning_rate"]),
                "--batch-size", str(params["batch_size"]), "--epochs", str(params["epochs"])]
+    if "early_stopping_patience" in params:
+        command.extend(["--early-stopping-patience", str(params["early_stopping_patience"])])
     result = subprocess.run(command, cwd=adapter.bundle, env=env, capture_output=True,
                             encoding="utf-8", errors="replace", timeout=config.train_timeout)
     if result.returncode:
@@ -80,6 +82,15 @@ def candidate_metrics(adapter, root, output, parent, parent_path, params, inputs
     report = read_json(output / "training.json")
     model = adapter.load_model(path)
     artifact = checkpoint(root, path, model)
+    requested_epochs = params["epochs"]
+    patience = params.get("early_stopping_patience")
+    epochs_run = report.get("epochs_run", requested_epochs if patience is None else None)
+    best_epoch = report.get("best_epoch", requested_epochs if patience is None else None)
+    if (type(epochs_run) is not int or type(best_epoch) is not int
+            or not 1 <= best_epoch <= epochs_run <= requested_epochs
+            or report.get("early_stopping_patience") != patience
+            or (patience is None and best_epoch != requested_epochs)):
+        raise ValueError("RUL 检查点的早停轮次与训练方案不一致")
     steps = (train_rows + params["batch_size"] - 1) // params["batch_size"]
     expected = {
         "stage_id": key, "profile": adapter.profile, "task": "regression",
@@ -88,8 +99,8 @@ def candidate_metrics(adapter, root, output, parent, parent_path, params, inputs
         "train_rows": train_rows, "validation_rows": len(validation["y"]),
         "learning_rate": params["learning_rate"], "batch_size": params["batch_size"],
         "initial_steps": parent.meta["steps"], "initial_epochs": parent.meta["epochs"],
-        "final_steps": parent.meta["steps"] + steps * params["epochs"],
-        "final_epochs": parent.meta["epochs"] + params["epochs"],
+        "final_steps": parent.meta["steps"] + steps * best_epoch,
+        "final_epochs": parent.meta["epochs"] + best_epoch,
     }
     if adapter.profile == "B":
         expected["target_unit"] = adapter.unit
@@ -100,7 +111,7 @@ def candidate_metrics(adapter, root, output, parent, parent_path, params, inputs
         raise ValueError("RUL 候选与父检查点、训练输入或缩放状态不一致")
     if not any(not np.array_equal(model.params[name], parent.params[name]) for name in parent.params):
         raise ValueError("RUL 候选没有更新模型权重")
-    return model, artifact, report
+    return model, artifact, {**report, "epochs_run": epochs_run, "best_epoch": best_epoch}
 
 
 def run_candidate(config, adapter, root, ledger, tracker, batch, plan, window, entry, before, history, target,
@@ -141,6 +152,8 @@ def run_candidate(config, adapter, root, ledger, tracker, batch, plan, window, e
         validation = adapter.samples(batch)
         model, artifact, report = candidate_metrics(
             adapter, root, output, parent, parent_path, params, inputs, key, train_rows, validation)
+        trial.update(training_seconds=report["training_seconds"], epochs_run=report["epochs_run"],
+                     best_epoch=report["best_epoch"], sample_passes=train_rows * report["epochs_run"])
         score = adapter.metrics(model, validation)
         if measure_candidate is not None:
             score = measure_candidate(output, score, plan, model.meta["seed"], names)
@@ -149,10 +162,16 @@ def run_candidate(config, adapter, root, ledger, tracker, batch, plan, window, e
         gain = (before - score["rmse"]) / max(before, 1e-12)
         trial.update(status="success", **score, artifact=artifact, checkpoint_sha256=artifact["checkpoint_sha256"],
                      current_relative_gain=gain, history_validation=scores, gate_failures=failures,
-                     history_drop=max((row["relative_increase"] for row in scores), default=None),
-                     training_seconds=report["training_seconds"], sample_passes=sample_passes)
+                     history_drop=max((row["relative_increase"] for row in scores), default=None))
+        reasons = {
+            "current_gain_insufficient": (
+                f"当前批 RMSE 降幅未达到 {config.rul_min_relative_gain:.2%}" if target is None
+                else "当前批 RMSE 未低于批初模型"
+            ),
+            "validation_target_not_met": f"当前批 RMSE 未达到本轮目标 {target}",
+        }
         decision.update(accepted=not failures, eligible=not failures, selected=artifact if not failures else entry,
-                        reason=", ".join(failures) if failures else "current_validation_passed",
+                        reason="、".join(reasons[key] for key in failures) if failures else "达到当前批验证门槛",
                         history_validation=scores)
     except (ValueError, TypeError, KeyError, OSError, RuntimeError, BadZipFile, subprocess.TimeoutExpired) as exc:
         trial.update(error_type=type(exc).__name__, error=str(exc)[-1500:])
@@ -177,14 +196,13 @@ def feature_drift(adapter, batch, previous, seed):
     return result
 
 
-def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, baseline, history, stop_after,
+def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, history, stop_after,
               *, measure_candidate=None):
     prefix = f"b{batch + 1:02d}"
     name = adapter.group_names[batch]
     entry_model = adapter.load_model(checked_path(root, entry, adapter))
     validation = adapter.samples(batch)
     before = adapter.metrics(entry_model, validation)
-    static = adapter.metrics(baseline, validation)
     completed = [row["batch"] for row in history]
     historical_batches = history_batches(history, enabled=config.evaluate_history)
     references = rul_references(adapter, historical_batches, entry_model)
@@ -246,15 +264,19 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
         attempts.append({field: trial[field] for field in (
             "id", "status", "effective_config", "training_batches", "rmse", "mae", "gate_failures",
             "current_relative_gain", "history_validation", "error_type") if field in trial})
+        decision = ledger.get("decision", trial["id"])
+        attempts[-1].update(candidate_feedback(
+            trial, decision, ("rmse", "mae"),
+            can_fallback=trial.get("gate_failures") == ["validation_target_not_met"],
+        ))
 
     best = choose_candidate(attempts)
     selected = ledger.get("trial", best["id"])["artifact"] if best else entry
     below_target = best is not None and bool(best["gate_failures"])
     chosen_plan = next((plan for plan in plans if best and plan["id"] == best["id"]),
                        plans[0] if plans else None)
-    selected_model = adapter.load_model(checked_path(root, selected, adapter))
-    score = ({key: best[key] for key in ("rmse", "mae")} if best and measure_candidate is not None
-             else adapter.metrics(selected_model, validation))
+    score = {key: best[key] for key in ("rmse", "mae")} if best else before
+    selected_model = adapter.load_model(checked_path(root, selected, adapter)) if best and references else entry_model
     past = rul_scores(adapter, selected_model, references)
     row = {"batch": batch, "source_file": name, "train_samples": train_samples,
            "validation_samples": len(validation["y"]), "entry": entry, "selected": selected,
@@ -262,7 +284,6 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
            "experiment_count": len(attempts), "selected_trial_id": best["id"] if best else None,
            "before_validation_rmse": before["rmse"], "before_validation_mae": before["mae"],
            "validation_rmse": score["rmse"], "validation_mae": score["mae"],
-           "static_validation_rmse": static["rmse"], "static_validation_mae": static["mae"],
            "feature_drift": drift, "drift_reference_batches": drift["reference_batches"],
            "history_validation_batches": [group for group, _, _ in references],
            "validation_target_rmse": validation_target,
@@ -283,5 +304,5 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
     ledger.put("batch", prefix, row)
     tracker.log_batch(row)
     unit = "循环" if adapter.unit == "cycles" else "分钟"
-    print(f"{name}: RMSE {static['rmse']:.3f} / {before['rmse']:.3f} / {score['rmse']:.3f} {unit}", flush=True)
+    print(f"{name}: RMSE {before['rmse']:.3f} → {score['rmse']:.3f} {unit}", flush=True)
     return row

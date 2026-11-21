@@ -62,8 +62,12 @@ def test_bearing_fixed_responses_resume_and_history_logging(tmp_path):
     assert seen[0]["batch_feedback"]["validation_target_rmse"] is None
     feedback = seen[1]["batch_feedback"]["attempts"][0]
     assert feedback["status"] == "success"
+    assert feedback["selection_status"] == "达到优先门槛"
+    assert set(feedback["validation_metrics"]) == {"rmse", "mae"}
+    assert feedback["sample_passes"] > 0
     assert feedback["rmse"] < seen[1]["current_validation"]["rmse"]
     one, two, three = result["batches"]
+    assert all("static_validation_rmse" not in row for row in result["batches"])
     assert one["promoted"] and one["stop_reason"] == "trainer_no_update"
     assert not three["promoted"]
     assert two["validation_target_rmse"] == one["validation_rmse"]

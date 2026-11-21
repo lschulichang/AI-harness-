@@ -30,12 +30,12 @@ def test_windows_model_separator_and_escape_check(tmp_path):
         resolve_model_path(root, r"..\outside.npz")
 
 
-def test_moved_window_run_resumes_saved_config_without_retraining(tmp_path, monkeypatch, official_bundle, dataset):
+def test_moved_window_run_resumes_saved_config_without_retraining(tmp_path, monkeypatch, official_bundle, fallback_dataset):
     import harness_core.gas_runner as workflow
 
     project = tmp_path / "AI+harness"
     shutil.copytree(official_bundle, project / "baseline/gas")
-    shutil.copytree(dataset.root, project / "data/gas")
+    shutil.copytree(fallback_dataset.root, project / "data/gas")
     monkeypatch.setattr(workflow, "project_root", lambda: project)
     config = RunConfig(data_dir="data/gas", swanlab_mode="disabled", strategy="rules", max_experiments=3)
     root, paused = run_workflow(config, runs_root=project / "runs", stop_after=1)

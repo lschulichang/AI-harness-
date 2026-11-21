@@ -27,7 +27,7 @@ from contest_data import (
 )
 from contest_harness.errors import HarnessError
 from harness_core.config import RunConfig
-from harness_core.gas_data import evaluate_samples, gas_samples
+from harness_core.gas_data import gas_samples
 from harness_core.gas_metrics import evaluate as trainer_evaluate
 from harness_core.gas_policy import (
     WINDOW_DRIFT_BATCHES,
@@ -143,7 +143,7 @@ def train_gas(config, rnd, root, ledger, tracker, projection, entry, parent_mode
     train = gas_samples(data, batch, "train")
     validation = gas_samples(data, batch, "validation")
     entry_path = root / entry["model_path"]
-    current = evaluate_samples(entry_path, validation)
+    current = trainer_evaluate(parent_model, validation)
     drift = rolling_drift(
         data, completed[-WINDOW_DRIFT_BATCHES:], train, WINDOW_TRAINER_CONFIG["drift"],
         config.seed + batch + 1, parent_model.meta["classes"],
@@ -159,8 +159,8 @@ def train_gas(config, rnd, root, ledger, tracker, projection, entry, parent_mode
             "label_js_divergence": drift["label_distribution"]["js_divergence"],
             "status": drift["status"], "reference_batches": drift["reference_batches"],
         },
-        "performance": {"current": trainer_evaluate(parent_model, validation)},
-        "data": {"new_labeled_samples": len(train["y"]) + len(validation["y"]),
+        "performance": {"current": current},
+        "data": {"new_labeled_samples": len(train["y"]),
                  "replay_batches": replay, "historical_replay_available": bool(replay)},
         "history": [row["trainer_history"] for row in reversed(history)],
         "validation_target": target,
@@ -179,9 +179,9 @@ def train_gas(config, rnd, root, ledger, tracker, projection, entry, parent_mode
     trial_id = best["id"] if best else None
     winner = next((i for i, item in enumerate(attempts) if item["trial_id"] == trial_id), 0)
     plan = plans[winner]
-    selected_score = measure.results[selected["model_path"]]["decision_scores"] if best else current
-    prompt_gain = (trainer_evaluate(Model.load(root / selected["model_path"]), validation)["macro_f1"]
-                   - context["performance"]["current"]["macro_f1"]) if best else 0.0
+    measured = measure.results.get(selected["model_path"])
+    selected_score = measured["decision_scores"] if measured else current
+    prompt_gain = measured["local_public_validation"]["macro_f1"] - current["macro_f1"] if measured else 0.0
     row = {
         "batch": batch, "source_file": data.batch_names[batch], "selected": selected, "promoted": best is not None,
         "experiment_count": len(attempts), "train_samples": len(train["y"]),
@@ -256,7 +256,7 @@ def train(rnd):
         model = Model.load(entry_path)
         validate_model(model, key, task)
         entry = checkpoint(root, entry_path, model)
-        projection = Projection(rnd, state, model, entry_path)
+        projection = Projection(rnd, state, model)
         history_records = rnd.history()
         measure = CandidateMeasurements(rnd, root, policy)
         transport = Gateway(rnd)
@@ -272,10 +272,9 @@ def train(rnd):
                     row = train_gas(config, rnd, root, ledger, tracker, projection, entry, model, measure, transport)
                 else:
                     adapter = (BearingProjection if key == "B" else CmapssProjection)(projection, model)
-                    static = adapter.load_model(state / "static.npz")
                     planner = RulTrainer(config, ledger, transport)
                     row = run_batch(config, adapter, root, ledger, tracker, planner, projection.batch, entry,
-                                    static, projection.history, None, measure_candidate=measure)
+                                    projection.history, None, measure_candidate=measure)
                 if not rnd.call_ids:
                     raise HarnessError("MODEL_CALL_REQUIRED", "宿主未返回真实模型调用回执")
                 successful = True

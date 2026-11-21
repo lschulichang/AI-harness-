@@ -66,11 +66,11 @@ def test_missing_api_key_fails_before_run_creation(tmp_path, monkeypatch):
     assert not (tmp_path / "runs").exists()
 
 
-def test_api_failure_counts_request_and_labels_fallback(dataset, tmp_path):
+def test_api_failure_counts_request_and_labels_fallback(fallback_dataset, tmp_path):
     def fail(messages):
         raise TimeoutError("secret_should_not_be_logged")
 
-    config = RunConfig(data_dir=str(dataset.root), swanlab_mode="disabled",
+    config = RunConfig(data_dir=str(fallback_dataset.root), swanlab_mode="disabled",
                        max_api_calls=1, max_experiments=1)
     root, summary = run_workflow(config, runs_root=tmp_path, transport=fail)
     assert summary["complete"] and summary["api_calls"] == 1
@@ -109,14 +109,14 @@ def test_reserved_request_is_not_reissued(tmp_path):
     ledger.close()
 
 
-def test_failed_candidate_keeps_model_and_continues(dataset, tmp_path, monkeypatch):
+def test_failed_candidate_keeps_model_and_continues(fallback_dataset, tmp_path, monkeypatch):
     import harness_core.gas_workflow as workflow
 
     def fail(*args):
         raise RuntimeError("simulated training failure")
 
     monkeypatch.setattr(workflow, "train_candidate", fail)
-    config = RunConfig(strategy="rules", data_dir=str(dataset.root), swanlab_mode="disabled", max_experiments=1)
+    config = RunConfig(strategy="rules", data_dir=str(fallback_dataset.root), swanlab_mode="disabled", max_experiments=1)
     root, summary = run_workflow(config, runs_root=tmp_path)
     assert summary["complete"] and summary["failed_stages"] == 1
     assert summary["experiments"] == 1 and summary["accepted_models"] == 0
@@ -125,8 +125,8 @@ def test_failed_candidate_keeps_model_and_continues(dataset, tmp_path, monkeypat
     assert trial["error_type"] == "RuntimeError" and trial["attempt_seconds"] >= 0
 
 
-def test_empty_training_budget_finishes_without_attempts(dataset, tmp_path):
-    config = RunConfig(strategy="rules", data_dir=str(dataset.root), swanlab_mode="disabled", gas_sample_budget=0)
+def test_empty_training_budget_finishes_without_attempts(fallback_dataset, tmp_path):
+    config = RunConfig(strategy="rules", data_dir=str(fallback_dataset.root), swanlab_mode="disabled", gas_sample_budget=0)
     _, summary = run_workflow(config, runs_root=tmp_path)
     assert summary["complete"] and summary["experiments"] == summary["api_calls"] == 0
     assert summary["reserved_training_sample_passes"] == 0

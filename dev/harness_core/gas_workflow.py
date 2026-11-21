@@ -24,7 +24,7 @@ from .gas_policy import (
 from .history_evaluation import gas_references, gas_scores, history_batches
 from .portability import resolve_model_path
 from .resource_monitor import BatchMeter
-from .runner import training_window
+from .runner import candidate_feedback, training_window
 from .storage import atomic_json, read_json
 
 
@@ -142,7 +142,7 @@ def evaluate_candidate(
         raise ValueError("训练产物与大模型决策、训练起点或标准化状态不一致")
     score = evaluate_samples(path, validation)
     if measure_candidate is not None:
-        score = measure_candidate(output, score)
+        score = measure_candidate(output, score, report)
     gain = score["macro_f1"] - current["macro_f1"]
     history_scores = gas_scores(path, history)
     worst = max(history_scores, key=lambda item: item["drop"], default=None)
@@ -274,7 +274,8 @@ def run_batch_trial(
         },
     )
 
-    def measure(directory, local_score):
+    def measure(directory, local_score, report):
+        trial["sample_passes"] = n_train * report["epochs_run"]
         return measure_candidate(
             directory, local_score, trainer_decision, request["seed"], training_batches
         )
@@ -507,14 +508,15 @@ def run_batch_search(
                     default=None,
                 ),
                 "eligible": decision["eligible"],
-                "reason": decision["reason"],
                 "error_type": trial.get("error_type"),
-                "sample_passes": trial["sample_passes"],
             }
         )
         attempts[-1].update(
             training_batches=trial["training_batches"], train_rows=trial["train_rows"]
         )
+        attempts[-1].update(candidate_feedback(
+            trial, decision, ("macro_f1", "accuracy"), can_fallback="fallback_candidate" in decision,
+        ))
         if allow_best_below_target:
             attempts[-1]["fallback_eligible"] = "fallback_candidate" in decision
         if decision["eligible"] and (best is None or decision["gain"] > best["gain"]):
@@ -582,7 +584,7 @@ def run_trainer_batches(
             entry_path = checked_path(root, entry)
             model = Model.load(entry_path)
             train = gas_samples(data, batch, "train")
-            current = evaluate_samples(entry_path, validation)
+            current = trainer_evaluate(model, validation)
             batch_size = data.batch_size(batch)
             drift = ledger.get("trainer_drift", batch_key)
             if drift is None:
@@ -611,10 +613,10 @@ def run_trainer_batches(
             context = {
                 "drift_report": drift_report,
                 "performance": {
-                    "current": trainer_evaluate(model, validation),
+                    "current": current,
                 },
                 "data": {
-                    "new_labeled_samples": batch_size,
+                    "new_labeled_samples": len(train["y"]),
                     "replay_batches": replay_batches,
                     "historical_replay_available": bool(replay_batches),
                 },
