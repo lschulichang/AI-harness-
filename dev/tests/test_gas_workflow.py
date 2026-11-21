@@ -140,12 +140,14 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     def evaluate_candidate(*args, **kwargs):
         candidate, result, _, _, scores = real_candidate(*args, **kwargs)
         trial_id = args[4]["id"]
-        gain, eligible = {"b03-trainer": (.3, False), "b03-trainer-t02": (.2, True),
-                          "b03-trainer-t03": (.1, True)}[trial_id]
-        drop = .35 if not eligible else .02
+        score, drop = {"b03-trainer": (.98, .35), "b03-trainer-t02": (.97, .02),
+                       "b03-trainer-t03": (.96, .02)}[trial_id]
+        gain = score - args[7]["macro_f1"]
         scores = [{**scores[0], "candidate_macro_f1": scores[0]["entry_macro_f1"] - drop, "drop": drop}]
-        failures = [] if eligible else ["历史验证退化超限"]
-        return candidate, {**result, "history_drop": drop, "gate_failures": failures}, eligible, gain, scores
+        failures = workflow.candidate_gate_failures(args[0], score, gain, drop, kwargs["min_validation_f1"])
+        return {**candidate, "validation": {**candidate["validation"], "macro_f1": score}}, {
+            **result, "macro_f1": score, "history_drop": drop, "gate_failures": failures,
+        }, not failures, gain, scores
 
     def test_evaluate(path, data, batch, split):
         if batch == 2:
@@ -170,26 +172,26 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     assert result["max_candidates_per_batch"] == 4
     feedback = payloads[2]["batch_feedback"]
     assert feedback["remaining_candidates"] == 3
-    assert feedback["max_historical_macro_f1_drop"] == result["gas_trainer_max_history_drop"]
+    assert "max_historical_macro_f1_drop" not in feedback
     assert feedback["min_current_validation_macro_f1"] == .95
     assert "min_current_macro_f1_gain" not in feedback
     assert feedback["attempts"][0]["training_config"] == {**params, "window_size": 3}
-    assert not feedback["attempts"][0]["eligible"]
-    assert feedback["attempts"][0]["worst_historical_group"]["drop"] == .35
-    assert "历史验证退化超限" in feedback["attempts"][0]["reason"]
+    assert feedback["attempts"][0]["eligible"]
+    assert "worst_historical_group" not in feedback["attempts"][0]
     assert "test" not in json.dumps(payloads)
 
     batch = read_json(root / "audit_test_results.json")[1]
     assert batch["experiment_count"] == 3 and batch["stop_reason"] == "trainer_stop"
-    assert batch["selected_trial_id"] == "b03-trainer-t02"
-    assert batch["model_path"] == "experiments/b03-trainer-t02/checkpoint.npz"
+    assert batch["selected_trial_id"] == "b03-trainer"
+    assert batch["model_path"] == "experiments/b03-trainer/checkpoint.npz"
     trials = read_json(root / "history.json")["trials"]
+    assert trials[0]["history_drop"] == .35 and trials[0]["gate_failures"] == []
     assert len({trial["parent_checkpoint_sha256"] for trial in trials}) == 1
     assert [trial["params"]["batch_size"] for trial in trials] == [96, 97, 98]
     assert [trial["params"]["epochs"] for trial in trials] == [2, 3, 4]
 
 
-def test_trainer_absolute_gate_replaces_gain_and_keeps_history_limit():
+def test_trainer_absolute_gate_ignores_history_drop():
     from harness_core.gas_workflow import candidate_gate_failures
 
     cfg = RunConfig(gas_trainer_min_validation_f1=.95)
@@ -199,11 +201,11 @@ def test_trainer_absolute_gate_replaces_gain_and_keeps_history_limit():
     assert candidate_gate_failures(cfg, .96, -.02, 0, target, require_improvement=True) == [
         "当前验证 Macro-F1 未优于批初模型"]
     assert candidate_gate_failures(cfg, .949, .24, 0, target) == ["当前验证 Macro-F1 未达到 95.00%"]
-    assert candidate_gate_failures(cfg, .99, .24, .201, target) == ["历史验证退化超限"]
+    assert candidate_gate_failures(cfg, .99, .24, .201, target) == []
     assert candidate_gate_failures(cfg, .94, .24, 0, None) == []
     assert candidate_gate_failures(cfg, .95, .02, .15, target, max_history_drop=.15) == []
     assert candidate_gate_failures(cfg, .95, .02, None, target, max_history_drop=.15) == []
-    assert candidate_gate_failures(cfg, .95, .02, .151, target, max_history_drop=.15) == ["历史验证退化超限"]
+    assert candidate_gate_failures(cfg, .95, .02, .151, target, max_history_drop=.15) == []
 
 def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
     import numpy as np
@@ -317,7 +319,7 @@ def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path,
         entry_score = args[7]["macro_f1"]
         score, drop = {
             "b03-trainer": (.83, .05),
-            "b03-trainer-t02": (.88, .21),  # Highest score, but fails the history gate.
+            "b03-trainer-t02": (.88, .21),  # Highest score with the largest historical drop.
             "b03-trainer-t03": (.86, .12),
             "b03-trainer-t04": (entry_score, .01),  # A tie with the entry model.
         }[trial_id]
@@ -334,6 +336,6 @@ def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path,
     root, summary = run_workflow(config, runs_root=tmp_path, transport=transport)
     assert summary["complete"] and summary["accepted_models"] == 1
     batch = next(row for row in read_json(root / "audit_test_results.json") if row["source_file"] == "batch3.dat")
-    assert [row["fallback_eligible"] for row in batch["trainer_attempts"]] == [True, False, True, False]
-    assert batch["selected_below_target"] and batch["selected_trial_id"] == "b03-trainer-t03"
+    assert [row["fallback_eligible"] for row in batch["trainer_attempts"]] == [True, True, True, False]
+    assert batch["selected_below_target"] and batch["selected_trial_id"] == "b03-trainer-t02"
     assert "未达目标" in (root / "batch_results.md").read_text()

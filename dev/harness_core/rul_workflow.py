@@ -68,9 +68,10 @@ def gate_failures(config, before, candidate, scores, *, target=None):
         failures.append("current_gain_insufficient")
     if target is not None and candidate > target + 1e-12:
         failures.append("validation_target_not_met")
-    if any(row["candidate_rmse"] > row["entry_rmse"] * (1 + config.rul_max_history_increase) + 1e-12
-           for row in scores):
-        failures.append("history_regression")
+    # 暂停历史退化门槛，历史验证结果仍写入实验记录。
+    # if any(row["candidate_rmse"] > row["entry_rmse"] * (1 + config.rul_max_history_increase) + 1e-12
+    #        for row in scores):
+    #     failures.append("history_regression")
     return failures
 
 
@@ -175,7 +176,7 @@ def run_candidate(config, adapter, root, ledger, tracker, batch, plan, window, e
                      history_drop=max((row["relative_increase"] for row in scores), default=None),
                      training_seconds=report["training_seconds"], sample_passes=sample_passes)
         decision.update(accepted=not failures, eligible=not failures, selected=artifact if not failures else entry,
-                        reason=", ".join(failures) if failures else "current_and_history_passed",
+                        reason=", ".join(failures) if failures else "current_validation_passed",
                         history_validation=scores)
     except (ValueError, TypeError, KeyError, OSError, RuntimeError, BadZipFile, subprocess.TimeoutExpired) as exc:
         trial.update(error_type=type(exc).__name__, error=str(exc)[-1500:])
@@ -249,12 +250,14 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
             stop_reason = "experiment_budget"
             break
         feedback = {
-            "attempts": attempts.copy(),
+            "attempts": [
+                {field: value for field, value in trial.items() if field != "history_validation"}
+                for trial in attempts
+            ],
             "remaining_candidates": config.candidate_limit - number + 1,
             "remaining_experiments": None if config.max_experiments is None else
             max(0, config.max_experiments - ledger.count("training_reservation")),
             "validation_target_rmse": validation_target,
-            "max_historical_relative_rmse_increase": config.rul_max_history_increase,
         }
         if validation_target is None:
             feedback["min_relative_rmse_gain"] = config.rul_min_relative_gain

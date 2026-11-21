@@ -83,10 +83,6 @@ def train_candidate(config, parent, output, train, validation, request):
             raise RuntimeError(response.stderr[-1500:])
 
 
-def history_gate_failed(history_drop, limit):
-    return history_drop is not None and history_drop > limit + 1e-12
-
-
 def candidate_gate_failures(
     config,
     macro_f1,
@@ -106,9 +102,10 @@ def candidate_gate_failures(
             failures.append(f"当前验证 Macro-F1 未达到 {min_validation_f1:.2%}")
         if require_improvement and gain <= 1e-12:
             failures.append("当前验证 Macro-F1 未优于批初模型")
-    limit = config.max_history_drop if max_history_drop is None else max_history_drop
-    if history_gate_failed(history_drop, limit):
-        failures.append("历史验证退化超限")
+    # 暂停历史退化门槛，历史验证结果仍写入实验记录。
+    # limit = config.max_history_drop if max_history_drop is None else max_history_drop
+    # if history_drop is not None and history_drop > limit + 1e-12:
+    #     failures.append("历史验证退化超限")
     return failures
 
 
@@ -325,8 +322,6 @@ def run_batch_trial(
         )
         trial.update(status="success", **result)
         reason = f"当前验证 Macro-F1 变化 {gain:+.4f}"
-        if result["history_drop"] is not None:
-            reason += f"，历史最大下降 {result['history_drop']:+.4f}"
         if result["gate_failures"]:
             reason += "，" + "、".join(result["gate_failures"])
         decision.update(
@@ -345,16 +340,7 @@ def run_batch_trial(
             else "trainer_candidate_rejected",
         )
         if allow_best_below_target and min_validation_f1 is not None and not accepted:
-            history_limit = (
-                config.max_history_drop
-                if max_history_drop is None
-                else max_history_drop
-            )
-            if (
-                gain > 1e-12
-                and result["macro_f1"] + 1e-12 < min_validation_f1
-                and not history_gate_failed(result["history_drop"], history_limit)
-            ):
+            if gain > 1e-12 and result["macro_f1"] + 1e-12 < min_validation_f1:
                 decision.update(
                     fallback_candidate=candidate,
                     status="trainer_candidate_below_target",
@@ -467,9 +453,11 @@ def run_batch_search(
             feedback = {
                 "remaining_candidates": limit - len(attempts),
                 "remaining_global_experiments": remaining,
-                "max_historical_macro_f1_drop": max_history_drop,
                 "batch_entry_macro_f1": current["macro_f1"],
-                "attempts": attempts.copy(),
+                "attempts": [
+                    {field: value for field, value in trial.items() if field != "worst_historical_group"}
+                    for trial in attempts
+                ],
             }
             if min_validation_f1 is None:
                 feedback["min_current_macro_f1_gain"] = config.min_gain

@@ -93,7 +93,7 @@ def batch_decision_label(row):
     )
     if row.get("selected_below_target"):
         selection = (
-            f"未达目标，采用通过历史门槛且优于批初模型的 {row['selected_trial_id']}"
+            f"未达目标，采用当前验证优于批初模型的 {row['selected_trial_id']}"
         )
     outcome = {
         "NO_UPDATE": "保留现用模型",

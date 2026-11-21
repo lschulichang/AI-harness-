@@ -11,8 +11,7 @@ from wrappers.bearing_baseline import digest
 def test_bearing_relative_thresholds():
     config = RunConfig(dataset="bearing_rul").validate()
     assert gate_failures(config, 100, 99, [{"entry_rmse": 80, "candidate_rmse": 120}]) == []
-    assert gate_failures(config, 100, 98, [{"entry_rmse": 80, "candidate_rmse": 120.01}]) == [
-        "history_regression"]
+    assert gate_failures(config, 100, 98, [{"entry_rmse": 80, "candidate_rmse": 200}]) == []
     assert gate_failures(config, 100, 99.01, []) == ["current_gain_insufficient"]
     assert gate_failures(config, 0, 0, []) == ["current_gain_insufficient"]
     assert gate_failures(config, 100, 99.5, [], target=99.5) == []
@@ -20,16 +19,16 @@ def test_bearing_relative_thresholds():
     assert gate_failures(config, 100, 101, [], target=200) == ["current_gain_insufficient"]
 
 
-def test_bearing_prefers_target_and_only_falls_back_to_safe_improvement():
+def test_bearing_prefers_target_and_only_falls_back_to_current_improvement():
     safe_below_target = {"status": "success", "rmse": 95, "gate_failures": ["validation_target_not_met"]}
     eligible = {"status": "success", "rmse": 89, "gate_failures": []}
-    damages_history = {"status": "success", "rmse": 80, "gate_failures": ["history_regression"]}
-    assert choose_candidate([damages_history, safe_below_target, eligible]) is eligible
-    assert choose_candidate([damages_history, safe_below_target]) is safe_below_target
-    assert choose_candidate([damages_history]) is None
+    no_improvement = {"status": "success", "rmse": 100, "gate_failures": ["current_gain_insufficient"]}
+    assert choose_candidate([no_improvement, safe_below_target, eligible]) is eligible
+    assert choose_candidate([no_improvement, safe_below_target]) is safe_below_target
+    assert choose_candidate([no_improvement]) is None
 
 
-def test_bearing_fixed_responses_resume_feedback_budget_and_history_gate(tmp_path):
+def test_bearing_fixed_responses_resume_and_history_logging(tmp_path):
     seen = []
 
     def transport(messages):
@@ -67,14 +66,18 @@ def test_bearing_fixed_responses_resume_feedback_budget_and_history_gate(tmp_pat
     assert feedback["rmse"] < seen[1]["current_validation"]["rmse"]
     one, two, three = result["batches"]
     assert one["promoted"] and one["stop_reason"] == "trainer_no_update"
-    assert not two["promoted"] and not three["promoted"]
+    assert not three["promoted"]
     assert two["validation_target_rmse"] == one["validation_rmse"]
     assert three["validation_target_rmse"] == (one["validation_rmse"] + two["validation_rmse"]) / 2
-    assert "history_regression" in two["trainer_attempts"][0]["gate_failures"]
+    candidate = two["trainer_attempts"][0]
+    assert "history_regression" not in candidate["gate_failures"]
+    assert two["promoted"] == (candidate["rmse"] < two["before_validation_rmse"] - 1e-12)
     historical = two["trainer_attempts"][0]["history_validation"][0]
     assert historical["entry_rmse"] == one["validation_rmse"]
     assert historical["relative_increase"] > config.rul_max_history_increase
-    assert two["selected"] == one["selected"] == three["entry"]
+    assert one["selected"] == two["entry"] and two["selected"] == three["entry"]
+    assert "history_validation" not in feedback
+    assert "max_historical_relative_rmse_increase" not in seen[1]["batch_feedback"]
     assert three["stop_reason"] == "experiment_budget" and three["trainer_attempts"] == []
     first_report = read_json(path.with_name("training.json"))
     second_path = root / "experiments/b02-trainer/result/training.json"

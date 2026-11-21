@@ -76,7 +76,7 @@ def rules(context, cfg):
     return validate({
         "decision": decision, "reason": reason,
         "training_config": dict(cfg["training"]) if decision in TRAINING_ACTIONS else {},
-        "evaluation_requirements": ["new_data_macro_f1", "recent_history_macro_f1_drop", "per_class_recall"],
+        "evaluation_requirements": ["new_data_macro_f1", "per_class_recall"],
     }, cfg)
 
 
@@ -149,7 +149,7 @@ class GasTrainer(Planner):
             if feedback.get("allow_best_below_target"):
                 prompt += (
                     " If no candidate reaches the validation target, the best below-target candidate "
-                    "may be selected at the end if it passes the history limit and improves over "
+                    "may be selected at the end if it improves over "
                     "the batch-entry model. Use min_current_validation_macro_f1 as the priority target."
                 )
         decision, error = None, ""
