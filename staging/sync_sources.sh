@@ -64,9 +64,8 @@ add("harness_core/runner.py", drop=("run_workflow",), edits=(
     ("from pathlib import Path\n\nfrom .config import RunConfig\nfrom .credentials import get_secret\nfrom .storage import read_json\n\n\n", ""),
 ))
 add("harness_core/config.py", drop=("project_root",), methods={"RunConfig": ("__post_init__", "from_saved_options")}, edits=(
-    ("from pathlib import Path\n\n\nPROVIDER_DEFAULTS = {\n"
+    ("from pathlib import Path\n\nPROVIDER_DEFAULTS = {\n"
      "    \"pytrio\": (\"Qwen/Qwen3.8-27B\", \"https://pytrio.com/api/openai/v1\", \"PYTRIO_API_KEY\"),\n"
-     "    \"deepseek\": (\"deepseek-flash\", \"https://api.deepseek.com\", \"DEEPSEEK_API_KEY\"),\n"
      "}\n\n\n", "\n\n"),
     ('    provider: str = "pytrio"\n', '    provider: str = "host_gateway_rpc"\n'),
     ("    base_url: str | None = None\n    api_key_env: str | None = None\n", ""),
@@ -74,12 +73,12 @@ add("harness_core/config.py", drop=("project_root",), methods={"RunConfig": ("__
     ('    swanlab_workspace: str | None = "ls_chulichang"\n', "    swanlab_workspace: str | None = None\n"),
     ('    competition: bool = False\n    data_dir: str = ""\n', ""),
     ('    baseline_dir: str = ""\n', ""),
-    ('        if self.provider not in PROVIDER_DEFAULTS:\n            raise ValueError("provider 只能是 deepseek 或 pytrio")\n', ""),
+    ('        if self.provider not in PROVIDER_DEFAULTS:\n            raise ValueError("provider 只支持 PyTRiO")\n', ""),
     ('        if self.swanlab_mode not in {"offline", "online", "disabled"}:\n',
      '        if self.swanlab_mode not in {"offline", "disabled"}:\n'),
     ('        if self.competition:\n            raise ValueError("官方 SDK 尚未接入：练习入口不能作为正式比赛入口。请先实现官方数据适配器。")\n'
-     '        if self.provider == "pytrio" and ("deepseek.com" in self.base_url or self.api_key_env == "DEEPSEEK_API_KEY"):\n'
-     '            raise ValueError("PyTRiO 需要使用其兼容地址和独立密钥环境变量")\n', ""),
+     '        if not self.base_url or not self.api_key_env:\n'
+     '            raise ValueError("PyTRiO 需要配置 API 地址和密钥环境变量")\n', ""),
 ))
 add("harness_core/llm_client.py", drop=("OpenAITransport",), edits=(
     ("from .credentials import get_secret\n\n\n", ""),
@@ -102,37 +101,38 @@ add("harness_core/tracking.py", methods={"Tracker": ("log_final",)}, edits=(
 ))
 
 add("harness_core/gas_data.py", drop=("open_gas_batches", "evaluate"), edits=(
-    ("from wrappers.gas_dataset import GasDriftData, load_gas_model\n\n\n"
-     'GAS_DATA_DIR = "data/gas+sensor+array+drift+dataset"\n\n\n',
-     "from wrappers.gas_dataset import load_gas_model\n\n\n"),
+    ("from wrappers.gas_dataset import GasDriftData, load_gas_model",
+     "from wrappers.gas_dataset import load_gas_model"),
+    ('GAS_DATA_DIR = "data/gas+sensor+array+drift+dataset"\n\n\n', ""),
 ))
 add("harness_core/gas_workflow.py", drop=("run_trainer_batches",), edits=(
     ("from statistics import mean\n", ""),
     ("from .gas_data import evaluate, evaluate_samples, gas_samples", "from .gas_data import evaluate_samples, gas_samples"),
     ("from .gas_metrics import evaluate as trainer_evaluate\n", ""),
-    ("from .gas_policy import (\n    GasTrainer, TRAINING_ACTIONS, WINDOW_DRIFT_BATCHES,\n"
-     "    WINDOW_TRAINER_CONFIG, WINDOW_VALIDATION_BATCHES,\n)\n",
+    ("from .gas_policy import (\n    TRAINING_ACTIONS,\n    WINDOW_DRIFT_BATCHES,\n"
+     "    WINDOW_TRAINER_CONFIG,\n    WINDOW_VALIDATION_BATCHES,\n    GasTrainer,\n)\n",
      "from .gas_policy import TRAINING_ACTIONS, WINDOW_TRAINER_CONFIG\n"),
     ("from .resource_monitor import BatchMeter\n", ""),
-    ("(config.api_key_env, ", "("),
+    ('name not in {config.api_key_env, "PYTHONPATH"}', 'name != "PYTHONPATH"'),
 ))
 add("harness_core/rul_workflow.py", drop=("evaluate_public_test", "write_summary", "run_rul"), edits=(
     ("from datetime import datetime\nfrom pathlib import Path\n", ""),
     ("import shutil\n", ""),
     ("from uuid import uuid4\n", ""),
     ("from threadpoolctl import threadpool_limits\n", ""),
-    ("from wrappers.bearing_baseline import BearingBaseline, PACKAGE, digest\n"
-     "from wrappers.bearing_pairs import PairedBearingBaseline, REPLAY_DIR\n"
-     "from wrappers.cmapss_baseline import CmapssBaseline, PACKAGE as C_PACKAGE, RAW_DATA, test_scores\n",
+    ("from wrappers.bearing_baseline import PACKAGE, BearingBaseline, digest\n"
+     "from wrappers.bearing_pairs import REPLAY_DIR, PairedBearingBaseline\n"
+     "from wrappers.cmapss_baseline import PACKAGE as C_PACKAGE\n"
+     "from wrappers.cmapss_baseline import RAW_DATA, CmapssBaseline, test_scores\n",
      "from wrappers.rul_baseline import digest\n"),
-    ("from .rul_policy import RulTrainer, LIMITS, TRAINING_ACTIONS, training_defaults",
+    ("from .rul_policy import LIMITS, TRAINING_ACTIONS, RulTrainer, training_defaults",
      "from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults"),
     ("from .config import project_root\n", ""),
     ("from .llm_client import request_usage_known\n", ""),
     ("from .portability import resolve_model_path, saved_data_path", "from .portability import resolve_model_path"),
     ("from .storage import Ledger, RunLock, atomic_json, read_json", "from .storage import read_json"),
     ("from .tracking import Tracker\n", ""),
-    ("(config.api_key_env, ", "("),
+    ('name not in {config.api_key_env, "PYTHONPATH"}', 'name != "PYTHONPATH"'),
     ("run_bearing_rul = run_rul  # 保留原 B 调用入口。\n", ""),
 ))
 
@@ -141,7 +141,7 @@ add("wrappers/gas_dataset.py", drop=("GasDriftData",), edits=(
     ('"""读取 UCI 气体传感器漂移数据的时间批次。"""', '"""读取平台提供的气体分类检查点。"""'),
     ('import hashlib\nimport json\nfrom functools import cached_property\nfrom pathlib import Path\n\n'
      'import numpy as np\nfrom sklearn.datasets import load_svmlight_file\n'
-     'from sklearn.model_selection import train_test_split\n\n\nIMPORT_MANIFEST = "gas-import.json"\n\n\n', ""),
+     'from sklearn.model_selection import train_test_split\n\nIMPORT_MANIFEST = "gas-import.json"\n\n\n', ""),
     ("def load_gas_model(checkpoint=None):", "def load_gas_model(checkpoint):"),
     ('    if checkpoint is None:\n        checkpoint = Path(__file__).resolve().parents[1] / "baseline/gas/checkpoint.npz"\n', ""),
 ))
@@ -149,7 +149,8 @@ add("wrappers/rul_baseline.py", drop=("read_rows",), methods={"RulBaseline": ("_
     ("import importlib\nimport importlib.util\n", ""), ("import sys\n", ""),
 ))
 add("wrappers/bearing_baseline.py", methods={"BearingBaseline": ("identity",)}, edits=(
-    ("from .rul_baseline import RulBaseline, digest, read_rows", "from .rul_baseline import RulBaseline"),
+    ("from .rul_baseline import digest as digest\n", ""),
+    ("from .rul_baseline import read_rows as read_rows\n", ""),
 ))
 add("wrappers/cmapss_baseline.py", drop=("test_scores",), methods={"CmapssBaseline": ("identity", "test_manifest", "test_samples")}, edits=(
     ("from pathlib import Path\n\nimport numpy as np\n\nfrom .rul_baseline import RulBaseline, digest",

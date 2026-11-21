@@ -21,7 +21,7 @@ def parser():
     run.add_argument("--baseline-dir", help="官方基线包目录，默认自动匹配任务")
     run.add_argument("--scenario", choices=["stream"])
     run.add_argument("--strategy", choices=["rules", "llm"])
-    run.add_argument("--provider", choices=["deepseek", "pytrio"])
+    run.add_argument("--provider", choices=["pytrio"])
     run.add_argument("--model")
     run.add_argument("--base-url")
     run.add_argument("--api-key-env")

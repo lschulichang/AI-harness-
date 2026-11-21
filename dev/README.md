@@ -14,9 +14,6 @@ bash run_linux.sh
 # 同一个闭环的规则调试入口
 bash run_linux.sh run --strategy rules --swanlab-mode disabled
 
-# 开发时选用 DeepSeek
-bash run_linux.sh run --provider deepseek
-
 # 查看已保存结果
 bash run_linux.sh status 'runs/运行编号'
 

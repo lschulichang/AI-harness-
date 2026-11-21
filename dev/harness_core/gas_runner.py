@@ -163,7 +163,7 @@ def write_report(root, config, ledger, manifest, active, *, data):
         "complete": len(batches) == len(replay_batches(data, manifest)),
         "experiments": len(trials),
         "accepted_models": sum(row["promoted"] for row in batches),
-        "llm_proposals": sum(t["source"] in {"deepseek", "pytrio"} for t in trials),
+        "llm_proposals": sum(t["source"] not in {"rules", "rules_fallback"} for t in trials),
         "fallback_experiments": sum(t["source"] == "rules_fallback" for t in trials),
         "final_checkpoint": active["model_path"],
         "final_checkpoint_sha256": active["checkpoint_sha256"],

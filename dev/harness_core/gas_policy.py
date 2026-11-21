@@ -12,23 +12,23 @@ WINDOW_TARGET_BATCHES = 4  # 求训练目标所用的批次数量
 WINDOW_TRAINER_CONFIG = {
     "drift": {
         "bins": 10,
-        "psi_warning": 0.1,
-        "ks_fdr": 0.05,
-        "mmd_samples": 300,
-        "mmd_permutations": 99,
-        "label_js_warning": 0.05,
-        "min_samples": 80,
+        "psi_warning": 0.1,  # 漂移指标PSI
+        "ks_fdr": 0.05,  # KS检验的显著性水平
+        "mmd_samples": 300,  # MMD样本数量
+        "mmd_permutations": 99,  # MMD排列数量
+        "label_js_warning": 0.05,  # 标签JS警告阈值
+        "min_samples": 80,  # 待确认
     },
-    "training": {
-        "learning_rate": 0.0003,
-        "batch_size": 64,
-        "epochs": 20,
-        "early_stopping_patience": 5,
-        "weight_decay": 0.0001,
-        "class_weighting": False,
-        "window_size": 4,
+    "training": {  # 训练参数
+        "learning_rate": 0.0003,  # 学习率
+        "batch_size": 64,  # 批次大小
+        "epochs": 20,  # 训练轮数
+        "early_stopping_patience": 5,  # 早停patience
+        "weight_decay": 0.0001,  # 权重衰减
+        "class_weighting": False,  # 类别权重
+        "window_size": 4,  # 窗口大小
     },
-    "limits": {
+    "limits": { #给大模型设置的训练参数限制
         "learning_rate": [1e-6, 0.01],
         "batch_size": [8, 512],
         "epochs": [1, 50],
@@ -38,7 +38,7 @@ WINDOW_TRAINER_CONFIG = {
     },
 }
 
-
+# 验证大模型返回的训练参数是否符合限制
 def validate(raw, cfg, *, require_complete=False):
     if not isinstance(raw, dict) or set(raw) != {
         "decision",
@@ -95,7 +95,7 @@ def validate(raw, cfg, *, require_complete=False):
     return raw
 
 
-def rules(context, cfg):
+def rules(context, cfg): #兜底规则
     current = context["performance"]["current"]
     target = context.get("validation_target")
     stable = target is not None and current["macro_f1"] >= target
@@ -133,7 +133,7 @@ def rules(context, cfg):
     )
 
 
-WINDOW_PROMPT = (
+WINDOW_PROMPT = ( #大模型训练参数搜索提示词
     "/no_think Return only concise JSON with exactly decision, reason, training_config, "
     "evaluation_requirements. Choose NO_UPDATE, INCREMENTAL_TRAINING or "
     "MIXED_DATA_TRAINING. Use training_config={} when skipping. For a candidate explicitly return "
@@ -146,13 +146,13 @@ WINDOW_PROMPT = (
     "Use validation evidence only. Do not claim held-out results or output code or commands."
 )
 
-
+#计算实际的window_size
 def effective_params(params, replay_count):
     return {**params, "window_size": min(params["window_size"], replay_count + 1)}
 
-
+#整理发给大模型的输入
 def compact_input(context, cfg):
-    def brief(metrics):
+    def brief(metrics):#简要的性能指标
         if metrics is None:
             return None
         return {
@@ -166,7 +166,7 @@ def compact_input(context, cfg):
 
     drift = context["drift_report"]
     return {
-        "drift": {
+        "drift": {#漂移指标
             "feature_count": len(drift["drifted_features"]),
             "top_feature_indices": drift["drifted_features"][:8],
             "mmd_p": (drift["mmd"] or {}).get("permutation_p"),
@@ -176,11 +176,11 @@ def compact_input(context, cfg):
             "status": drift["status"],
             "reference_batches": drift["reference_batches"],
         },
-        "current_validation": brief(context["performance"]["current"]),
-        "new_rows": context["data"]["new_labeled_samples"],
-        "replay_available": context["data"]["historical_replay_available"],
-        "replay_batches": context["data"]["replay_batches"],
-        "recent_history": [
+        "current_validation": brief(context["performance"]["current"]),#旧模型在新数据上的性能指标
+        "new_rows": context["data"]["new_labeled_samples"],#训练集和验证集的新样本数量
+        "replay_available": context["data"]["historical_replay_available"],#是否存在历史回放数据
+        "replay_batches": context["data"]["replay_batches"],#历史回放数据
+        "recent_history": [#最近3批的训练参数和性能指标
             {
                 "batch": row["batch"],
                 "decision": row["decision"],

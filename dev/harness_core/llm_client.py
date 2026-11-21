@@ -31,8 +31,6 @@ class OpenAITransport:
             limit = self.default_max_tokens
         if limit is not None:
             kwargs["max_tokens"] = limit
-        if self.config.provider == "deepseek":
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         response = self.client.chat.completions.create(
             model=self.config.model, messages=messages, response_format={"type": "json_object"},
             temperature=self.temperature, **kwargs,

@@ -27,9 +27,10 @@ def checked_path(root, entry):
 
 def train_candidate(config, parent, output, train, validation, request):
     output.parent.mkdir(exist_ok=True)
-    env = os.environ.copy()
-    for key in ("PYTRIO_API_KEY", "DEEPSEEK_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
-        env.pop(key, None)
+    env = {
+        name: value for name, value in os.environ.items()
+        if name != "PYTHONPATH" and not name.endswith("_API_KEY")
+    }
     env.update(BASELINE_CPU_THREADS="1", OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
     with tempfile.TemporaryDirectory(prefix="gas-trainer-input-") as temp:
         arrays = Path(temp) / "samples.npz"

@@ -5,7 +5,6 @@ from pathlib import Path
 
 PROVIDER_DEFAULTS = {
     "pytrio": ("Qwen/Qwen3.8-27B", "https://pytrio.com/api/openai/v1", "PYTRIO_API_KEY"),
-    "deepseek": ("deepseek-flash", "https://api.deepseek.com", "DEEPSEEK_API_KEY"),
 }
 
 
@@ -75,13 +74,13 @@ class RunConfig:
         if self.strategy not in {"rules", "llm"}:
             raise ValueError("strategy 只能是 llm 或 rules；旧对照入口已移除")
         if self.provider not in PROVIDER_DEFAULTS:
-            raise ValueError("provider 只能是 deepseek 或 pytrio")
+            raise ValueError("provider 只支持 PyTRiO")
         if self.swanlab_mode not in {"offline", "online", "disabled"}:
             raise ValueError("SwanLab 模式无效")
         if self.competition:
             raise ValueError("官方 SDK 尚未接入：练习入口不能作为正式比赛入口。请先实现官方数据适配器。")
-        if self.provider == "pytrio" and ("deepseek.com" in self.base_url or self.api_key_env == "DEEPSEEK_API_KEY"):
-            raise ValueError("PyTRiO 需要使用其兼容地址和独立密钥环境变量")
+        if not self.base_url or not self.api_key_env:
+            raise ValueError("PyTRiO 需要配置 API 地址和密钥环境变量")
         if self.trials_per_batch is not None and (type(self.trials_per_batch) is not int or self.trials_per_batch < 1):
             raise ValueError("单批实验预算无效")
         if self.max_api_calls is not None and (type(self.max_api_calls) is not int or self.max_api_calls < 0):

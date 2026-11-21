@@ -71,9 +71,10 @@ def choose_candidate(attempts):
 
 
 def train_candidate(config, adapter, parent, output, key, params, inputs):
-    env = os.environ.copy()
-    for name in ("DEEPSEEK_API_KEY", "PYTRIO_API_KEY", "SWANLAB_API_KEY", "PYTHONPATH"):
-        env.pop(name, None)
+    env = {
+        name: value for name, value in os.environ.items()
+        if name != "PYTHONPATH" and not name.endswith("_API_KEY")
+    }
     env.update(BASELINE_CPU_THREADS="1", PYTHONDONTWRITEBYTECODE="1", OPENBLAS_NUM_THREADS="1",
                OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
     command = [sys.executable, "-B", "-m", "baselines.train", "--profile", adapter.profile,

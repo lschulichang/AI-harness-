@@ -21,7 +21,7 @@ def test_cloud_log_contains_batch_test_and_final_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(swanlab, "Text", lambda value: value)
     ledger = Ledger(tmp_path / "experiments.sqlite")
     trial = {
-        "id": "b03-trainer", "batch": 2, "status": "success", "source": "deepseek",
+        "id": "b03-trainer", "batch": 2, "status": "success", "source": "pytrio",
         "params": {"learning_rate": .001, "batch_size": 128, "epochs": 1, "window_size": 2},
         "training_seconds": .1, "macro_f1": .9,
     }

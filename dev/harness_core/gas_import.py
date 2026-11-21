@@ -295,7 +295,7 @@ def main():
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--batch", type=int, choices=range(2, GasDriftData.batch_count + 1), help="回放批号，batch1 保留为官方模型起点")
     parser.add_argument("--schema", type=Path, help="用于大模型起草映射的字段与单位说明")
-    parser.add_argument("--provider", choices=("pytrio", "deepseek"), default="pytrio")
+    parser.add_argument("--provider", choices=("pytrio",), default="pytrio")
     parser.add_argument("--model")
     parser.add_argument("--checkpoint", type=Path, default=project_root() / "baseline/gas/checkpoint.npz")
     args = parser.parse_args()

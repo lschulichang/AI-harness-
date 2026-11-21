@@ -21,7 +21,7 @@ cd '/home/adc/桌面/LXB/staging'
 bash build_submission.sh
 ```
 
-脚本构建并在只读根文件系统运行 `describe`，随后用 `docker image save` 导出并核验单个 Linux/amd64 镜像。上传生成的 `mirror/2.tar` 到比赛平台，再使用平台提供的试运行检查真实宿主。
+脚本构建并在只读根文件系统运行 `describe`，随后用 `docker image save` 导出并核验单个 Linux/amd64 镜像。上传生成的 `mirror/3.tar` 到比赛平台，再使用平台提供的试运行检查真实宿主。
 
 ## 更新开发代码
 

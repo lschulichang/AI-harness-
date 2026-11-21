@@ -144,11 +144,11 @@ def test_legacy_resume_is_rejected_without_changing_results(tmp_path):
     assert sorted(path.name for path in root.iterdir()) == ["dataset.json"]
 
 
-def test_competition_mode_cannot_accidentally_call_deepseek():
+def test_competition_mode_and_unsupported_provider_are_rejected():
     with pytest.raises(ValueError, match="官方 SDK"):
         RunConfig(competition=True).validate()
     with pytest.raises(ValueError, match="PyTRiO"):
-        RunConfig(provider="pytrio", base_url="https://api.deepseek.com").validate()
+        RunConfig(provider="unsupported").validate()
 
 
 def test_default_pytrio_configuration():
@@ -158,24 +158,23 @@ def test_default_pytrio_configuration():
     assert cfg.api_key_env == "PYTRIO_API_KEY"
 
 
-def test_deepseek_client_uses_json_and_no_hidden_retries(monkeypatch):
+def test_pytrio_client_uses_json_and_no_hidden_retries(monkeypatch):
     import httpx
     from openai import OpenAI
     seen = []
     def handler(request):
         body = json.loads(request.content)
         seen.append(body)
-        return httpx.Response(200, json={"id":"mock", "object":"chat.completion", "created":0, "model":"deepseek-flash",
+        return httpx.Response(200, json={"id":"mock", "object":"chat.completion", "created":0, "model":"Qwen/Qwen3.8-27B",
             "choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}],
             "usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}})
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake_for_local_mock_only")
-    transport = OpenAITransport(RunConfig(provider="deepseek"))
+    monkeypatch.setenv("PYTRIO_API_KEY", "fake_for_local_mock_only")
+    transport = OpenAITransport(RunConfig())
     transport.client = OpenAI(api_key="fake_for_local_mock_only", base_url="https://mock.invalid", max_retries=0,
                               http_client=httpx.Client(transport=httpx.MockTransport(handler)))
     response = transport([{"role":"user","content":"json"}])
     assert response["prompt_tokens"] == 13 and response["completion_tokens"] == 5
     assert seen[0]["response_format"] == {"type":"json_object"}
-    assert seen[0]["thinking"] == {"type":"disabled"}
     assert "max_tokens" not in seen[0]
     transport([{"role": "user", "content": "json"}], max_tokens=40)
     assert seen[1]["max_tokens"] == 40
