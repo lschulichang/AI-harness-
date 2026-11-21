@@ -1,12 +1,13 @@
 """B、C 回归训练师的白名单参数和候选反馈。"""
 from .llm_client import OpenAITransport, Planner
-from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
+from .runner import (
+    EARLY_STOPPING_PATIENCE, TRAINING_DEFAULTS, TRAINING_LIMITS, effective_search_parameters,
+    reference_window, search_parameters, validate_search_parameters,
+)
 
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
-LIMITS = {"learning_rate": (1e-6, 0.01), "batch_size": (8, 512),
-          "epochs": (1, 50)}
-DEFAULTS = {"learning_rate": 0.001, "batch_size": 128, "epochs": 5,
-            "early_stopping_patience": 5}
+LIMITS = TRAINING_LIMITS
+DEFAULTS = {**TRAINING_DEFAULTS, "batch_size": 128, "early_stopping_patience": EARLY_STOPPING_PATIENCE}
 SYSTEM = (
     "current_validation 始终是本批入口模型的验证指标，不能当作任何候选的结果。"
     "batch_feedback.attempts 为空时意味着本批尚未试训，不能据此判定续训没有收益或没有通过选模门槛。"
@@ -15,10 +16,10 @@ SYSTEM = (
     "每次提案只训练一个候选，都从同一批初模型出发，只使用当前和已开放的训练数据。"
     "仅返回简洁 JSON，字段为 decision、reason、training_config。"
     "动作可为 NO_UPDATE、INCREMENTAL_TRAINING、MIXED_DATA_TRAINING。"
-    "epochs 是每个候选的训练上限。可选 early_stopping_patience 取 1 至 15，默认 5，"
-    "根据当前批验证 RMSE 早停并保留最佳轮次。"
-    "跳过或停止时 training_config 为 {}；训练须给出 learning_rate、batch_size、epochs。不要返回 window_size。"
-    f"仅本批续训使用当前批。混合续训时，程序固定使用本批和最多最近 {MIXED_TRAINING_WINDOW - 1} 批历史训练数据。没有历史时不能选混合续训。"
+    "epochs 是每个候选的训练上限，当前批验证 RMSE 用于早停。"
+    "跳过或停止时 training_config 为 {}。训练时只返回 learning_rate、epochs、window_size。"
+    "窗口包含当前批。仅本批续训固定为 1，混合续训可选 2 至 6，使用最多 window_size - 1 批最近历史。"
+    "没有历史时不能选混合续训。"
 )
 FEEDBACK = (
     " 本批已有候选结果。查看验证指标、判定原因、实际样本遍历量和剩余预算。"
@@ -46,12 +47,12 @@ def rules(context, defaults):
     else:
         return {"decision": "MIXED_DATA_TRAINING" if replay else "INCREMENTAL_TRAINING",
                 "reason": "尝试保守续训，由实际候选验证结果决定是否采用",
-                "training_config": {**defaults, "window_size": window_size_for_action(
+                "training_config": {**defaults, "window_size": reference_window(
                     "MIXED_DATA_TRAINING" if replay else "INCREMENTAL_TRAINING")}}
     return {"decision": "NO_UPDATE", "reason": reason, "training_config": {}}
 
 
-def validate(proposal, history_count):
+def validate(proposal, history_count, dataset="bearing_rul"):
     if not isinstance(proposal, dict) or set(proposal) != {"decision", "reason", "training_config"}:
         raise ValueError("方案字段必须为 decision、reason、training_config")
     action, reason, params = (proposal[key] for key in ("decision", "reason", "training_config"))
@@ -63,23 +64,10 @@ def validate(proposal, history_count):
         if params:
             raise ValueError("保留模型时训练参数必须为空")
         return proposal
-    if set(params) - {"window_size", "early_stopping_patience"} != LIMITS.keys():
-        raise ValueError("训练配置不符合 RUL 白名单")
-    for name, (low, high) in LIMITS.items():
-        value = params[name]
-        types = (int, float) if name == "learning_rate" else (int,)
-        if type(value) not in types or not low <= value <= high:
-            raise ValueError(f"{name} 超出允许范围")
-    if "window_size" in params and (type(params["window_size"]) is not int
-                                   or not 1 <= params["window_size"] <= 8):
-        raise ValueError("旧窗口字段无效")
+    validate_search_parameters(params, action)
     if action == "MIXED_DATA_TRAINING" and not history_count:
         raise ValueError("混合训练须有历史数据")
-    patience = params.get("early_stopping_patience", DEFAULTS["early_stopping_patience"])
-    if type(patience) is not int or not 1 <= patience <= 15:
-        raise ValueError("early_stopping_patience 超出允许范围")
-    return {**proposal, "training_config": {**params, "early_stopping_patience": patience,
-                                            "window_size": window_size_for_action(action)}}
+    return {**proposal, "training_config": {**training_defaults(dataset), **params}}
 
 
 class RulTrainer(Planner):
@@ -98,11 +86,11 @@ class RulTrainer(Planner):
         source = "rules"
         if self.config.strategy == "llm":
             def check(proposal):
-                validated = validate(proposal, count)
+                validated = validate(proposal, count, self.config.dataset)
                 params = validated["training_config"]
                 if params:
-                    effective = {**params, "window_size": min(params["window_size"], count + 1)}
-                    if any(attempt["effective_config"] == effective for attempt in previous):
+                    effective = effective_search_parameters(params, count)
+                    if any(search_parameters(attempt["effective_config"]) == effective for attempt in previous):
                         raise ValueError("该有效训练配置已尝试")
                 return validated
 

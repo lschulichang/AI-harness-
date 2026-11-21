@@ -10,8 +10,7 @@ from harness_core.storage import Ledger, read_json
 def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, monkeypatch):
     import harness_core.gas_workflow as workflow
 
-    params = {"learning_rate": .0003, "batch_size": 96, "epochs": 2, "early_stopping_patience": 1,
-              "weight_decay": .0002, "window_size": 4, "class_weighting": True}
+    params = {"learning_rate": .0003, "epochs": 2, "window_size": 4}
     payloads = []
     actions = [
         ("INCREMENTAL_TRAINING", {**params, "window_size": 1}),
@@ -48,7 +47,8 @@ def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, m
     assert not partial["complete"] and partial["experiments"] == 1 and partial["api_calls"] == 1
     trial = read_json(root / "history.json")["trials"][0]
     assert trial["status"] == "success"
-    assert trial["params"] == {**params, "window_size": 1}
+    assert trial["params"] == {**params, "window_size": 1, "batch_size": 64,
+                               "early_stopping_patience": 5, "weight_decay": .0001, "class_weighting": False}
     report = root / "experiments/b02-trainer/training.json"
     stamp = report.stat().st_mtime_ns
     assert read_json(report)["request"]["training_batches"] == ["batch2.dat"]
@@ -118,8 +118,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     real_candidate = workflow.evaluate_candidate
     real_evaluate = workflow.evaluate
     payloads = []
-    params = {"learning_rate": .0003, "batch_size": 96, "epochs": 2, "early_stopping_patience": 1,
-              "weight_decay": .0002, "window_size": 4, "class_weighting": True}
+    params = {"learning_rate": .0003, "epochs": 2, "window_size": 4}
 
     def transport(messages):
         payload = json.loads(messages[1]["content"])
@@ -129,10 +128,10 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
         if len(payloads) == 4:
             assert "already been tried" in messages[-1]["content"]
         should_train = 2 <= len(payloads) <= 5
-        plan = {**params, "batch_size": 96 + len(attempts), "epochs": 2 + len(attempts)}
+        plan = {**params, "epochs": 2 + len(attempts)}
         if len(payloads) == 3:
-            # The reported legacy width is ignored, leaving the same effective plan.
-            plan = {**params, "window_size": 8}
+            # Only one historical batch is available, so both requests use the same window.
+            plan = {**params, "window_size": 6}
         return {"content": json.dumps({
             "decision": "MIXED_DATA_TRAINING" if should_train else "NO_UPDATE",
             "reason": "test response", "evaluation_requirements": [],
@@ -177,7 +176,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     assert "max_historical_macro_f1_drop" not in feedback
     assert feedback["min_current_validation_macro_f1"] == .95
     assert "min_current_macro_f1_gain" not in feedback
-    assert feedback["attempts"][0]["training_config"] == {**params, "window_size": 3}
+    assert feedback["attempts"][0]["training_config"] == params
     assert feedback["attempts"][0]["eligible"]
     assert feedback["attempts"][0]["selection_status"] == "达到优先门槛"
     assert set(feedback["attempts"][0]["validation_metrics"]) == {"macro_f1", "accuracy"}
@@ -192,7 +191,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     trials = read_json(root / "history.json")["trials"]
     assert trials[0]["history_drop"] == .35 and trials[0]["gate_failures"] == []
     assert len({trial["parent_checkpoint_sha256"] for trial in trials}) == 1
-    assert [trial["params"]["batch_size"] for trial in trials] == [96, 97, 98]
+    assert [trial["params"]["batch_size"] for trial in trials] == [64, 64, 64]
     assert [trial["params"]["epochs"] for trial in trials] == [2, 3, 4]
 
 
@@ -256,8 +255,7 @@ def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
         captured.append(json.loads(messages[1]["content"]))
         return {"content": json.dumps({
             "decision": "INCREMENTAL_TRAINING", "reason": "testing alternate schema", "evaluation_requirements": [],
-            "training_config": {"learning_rate": .0003, "batch_size": 16, "epochs": 2, "early_stopping_patience": 1,
-                                "weight_decay": .0001, "window_size": 1, "class_weighting": True},
+            "training_config": {"learning_rate": .0003, "epochs": 2, "window_size": 1},
         })}
 
     config = RunConfig(strategy="llm", data_dir=str(raw_dir), baseline_dir=str(bundle),
@@ -301,8 +299,7 @@ def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path,
 
     real_evaluate_candidate = workflow.evaluate_candidate
     responses = []
-    params = {"learning_rate": .0003, "batch_size": 96, "epochs": 2, "early_stopping_patience": 1,
-              "weight_decay": .0002, "window_size": 2, "class_weighting": True}
+    params = {"learning_rate": .0003, "epochs": 2, "window_size": 2}
 
     def transport(messages):
         payload = json.loads(messages[1]["content"])
@@ -312,7 +309,7 @@ def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path,
         return {"content": json.dumps({
             "decision": "MIXED_DATA_TRAINING" if train else "NO_UPDATE",
             "reason": "testing the batch-end fallback", "evaluation_requirements": [],
-            "training_config": {**params, "batch_size": 96 + count} if train else {},
+            "training_config": {**params, "learning_rate": .0003 + count * 1e-5} if train else {},
         })}
 
     def evaluate_candidate(*args, **kwargs):

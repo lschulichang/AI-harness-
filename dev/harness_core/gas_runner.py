@@ -289,8 +289,8 @@ def run_gas_mlp(
     policy = {
         "version": WINDOW_POLICY,
         "drift": WINDOW_TRAINER_CONFIG["drift"],
-        "training_defaults": WINDOW_TRAINER_CONFIG["training"],
-        "training_limits": WINDOW_TRAINER_CONFIG["limits"],
+        "training_defaults": saved_policy.get("training_defaults", WINDOW_TRAINER_CONFIG["training"]),
+        "training_limits": saved_policy.get("training_limits", WINDOW_TRAINER_CONFIG["limits"]),
         "prompt_macro_f1": saved_policy.get("prompt_macro_f1", "checkpoint_class_set"),
         "history_gain_source": "validation_only",
         "max_candidates_per_batch": config.candidate_limit,

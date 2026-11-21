@@ -3,7 +3,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 tag=contest-harness-abc:1.0.2
-archive=mirror/6.tar
+archive=mirror/7.tar
 
 docker build --platform linux/amd64 --tag "$tag" .
 test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$tag")" = linux/amd64

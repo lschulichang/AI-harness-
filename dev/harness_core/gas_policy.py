@@ -1,7 +1,10 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 
 from .llm_client import OpenAITransport, Planner
-from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
+from .runner import (
+    EARLY_STOPPING_PATIENCE, TRAINING_DEFAULTS, TRAINING_LIMITS, effective_search_parameters,
+    reference_window, search_parameters, validate_search_parameters,
+)
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
@@ -19,26 +22,14 @@ WINDOW_TRAINER_CONFIG = {
         "label_js_warning": 0.05,  # 标签JS警告阈值
         "min_samples": 80,  # 待确认
     },
-    "training": {  # 训练参数
-        "learning_rate": 0.0003,  # 学习率
-        "batch_size": 64,  # 批次大小
-        "epochs": 20,  # 训练轮数
-        "early_stopping_patience": 5,  # 早停patience
-        "weight_decay": 0.0001,  # 权重衰减
-        "class_weighting": False,  # 类别权重
-        "window_size": MIXED_TRAINING_WINDOW,  # 固定混合窗口
-    },
-    "limits": { #给大模型设置的训练参数限制
-        "learning_rate": [1e-6, 0.01],
-        "batch_size": [8, 512],
-        "epochs": [1, 50],
-        "early_stopping_patience": [1, 15],
-        "weight_decay": [0, 0.01],
-    },
+    "training": {**TRAINING_DEFAULTS, "batch_size": 64,
+                 "early_stopping_patience": EARLY_STOPPING_PATIENCE,
+                 "weight_decay": 0.0001, "class_weighting": False},
+    "limits": TRAINING_LIMITS,
 }
 
 # 验证大模型返回的训练参数是否符合限制
-def validate(raw, cfg, *, require_complete=False):
+def validate(raw, cfg):
     if not isinstance(raw, dict) or set(raw) != {
         "decision",
         "reason",
@@ -59,38 +50,14 @@ def validate(raw, cfg, *, require_complete=False):
     ):
         raise ValueError("invalid evaluation requirements")
     supplied = raw["training_config"]
-    training_keys = cfg["training"].keys()
-    if not isinstance(supplied, dict) or set(supplied) - training_keys:
-        raise ValueError("invalid training configuration keys")
+    if not isinstance(supplied, dict):
+        raise ValueError("invalid training configuration")
     if raw["decision"] not in TRAINING_ACTIONS:
         if supplied:
             raise ValueError("nontraining decision must have empty training_config")
         return raw
-    if require_complete and set(supplied) - {"window_size"} != training_keys - {"window_size"}:
-        raise ValueError(
-            "training_config must explicitly contain every training parameter"
-        )
-    config = {**cfg["training"], **supplied}
-    # Older model replies may still include a width. It never controls replay.
-    if "window_size" in supplied and (type(supplied["window_size"]) is not int
-                                     or not 1 <= supplied["window_size"] <= 8):
-        raise ValueError("invalid legacy window_size")
-    for key, (lower, upper) in cfg["limits"].items():
-        value = config[key]
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not lower <= value <= upper
-        ):
-            raise ValueError(f"{key} is outside configured bounds")
-    for key in ("batch_size", "epochs", "early_stopping_patience"):
-        if type(config[key]) is not int:
-            raise ValueError(f"{key} must be an integer")
-    if type(config["class_weighting"]) is not bool:
-        raise ValueError("class_weighting must be boolean")
-    config["window_size"] = window_size_for_action(raw["decision"])
-    raw["training_config"] = config
-    return raw
+    validate_search_parameters(supplied, raw["decision"])
+    return {**raw, "training_config": {**cfg["training"], **supplied}}
 
 
 def rules(context, cfg): #兜底规则
@@ -118,7 +85,7 @@ def rules(context, cfg): #兜底规则
         {
             "decision": decision,
             "reason": reason,
-            "training_config": dict(cfg["training"])
+            "training_config": {**search_parameters(cfg["training"]), "window_size": reference_window(decision)}
             if decision in TRAINING_ACTIONS
             else {},
             "evaluation_requirements": [
@@ -134,19 +101,14 @@ WINDOW_PROMPT = ( #大模型训练参数搜索提示词
     "/no_think Return only concise JSON with exactly decision, reason, training_config, "
     "evaluation_requirements. Choose NO_UPDATE, INCREMENTAL_TRAINING or "
     "MIXED_DATA_TRAINING. Use training_config={} when skipping. For a candidate explicitly return "
-    "learning_rate, batch_size, epochs, early_stopping_patience, weight_decay and class_weighting "
-    "within training_limits. Omit window_size; the harness sets it from the action. "
-    f"Incremental training uses the current batch. Mixed training uses the current batch and up to {MIXED_TRAINING_WINDOW - 1} newest historical batches. "
+    "only learning_rate, epochs and window_size within training_limits. "
+    "A window counts the current batch. Use 1 for incremental training and 2–6 for mixed training. "
+    "For mixed training use the latest available history, up to window_size - 1 batches. "
     "Do not choose mixed training without any replay batches. evaluation_requirements must be an array of "
     "strings. Missing drift reference or labels mean the corresponding evidence is unavailable. "
     "Use validation evidence only. Do not claim held-out results or output code or commands."
 )
 
-#计算实际的window_size
-def effective_params(params, replay_count):
-    return {**params, "window_size": min(params["window_size"], replay_count + 1)}
-
-#整理发给大模型的输入
 def compact_input(context, cfg):
     def brief(metrics):#简要的性能指标
         if metrics is None:
@@ -173,7 +135,7 @@ def compact_input(context, cfg):
             "reference_batches": drift["reference_batches"],
         },
         "current_validation": brief(context["performance"]["current"]),#旧模型在新数据上的性能指标
-        "new_rows": context["data"]["new_labeled_samples"],#训练集和验证集的新样本数量
+        "new_rows": context["data"]["new_labeled_samples"],#当前训练集的样本数量
         "replay_available": context["data"]["historical_replay_available"],#是否存在历史回放数据
         "replay_batches": context["data"]["replay_batches"],#历史回放数据
         "recent_history": [#最近3批的训练参数和性能指标
@@ -186,7 +148,7 @@ def compact_input(context, cfg):
             }
             for row in context["history"][:3]
         ],
-        "training_defaults": {key: value for key, value in cfg["training"].items() if key != "window_size"},
+        "training_defaults": search_parameters(cfg["training"]),
         "training_limits": cfg["limits"],
     }
 
@@ -205,8 +167,11 @@ class GasTrainer(Planner):
         prompt = WINDOW_PROMPT
         attempts = []
         if feedback is not None:
-            payload["batch_feedback"] = feedback
             attempts = feedback["attempts"]
+            payload["batch_feedback"] = {**feedback, "attempts": [
+                {**attempt, "training_config": search_parameters(attempt["training_config"])}
+                for attempt in attempts
+            ]}
             prompt += (
                 " Each decision requests at most one candidate. All candidates start from the same batch-entry model. "
                 "Review batch_feedback for actual validation, selection status, gate failures, sample passes and remaining budgets. "
@@ -223,7 +188,7 @@ class GasTrainer(Planner):
         if self.config.strategy == "llm":
 
             def check(value):
-                decision = validate(value, cfg, require_complete=True)
+                decision = validate(value, cfg)
                 if (
                     decision["decision"] == "MIXED_DATA_TRAINING"
                     and not payload["replay_available"]
@@ -231,8 +196,8 @@ class GasTrainer(Planner):
                     raise ValueError("mixed training requires replay samples")
                 previous_count = len(payload.get("replay_batches", ()))
                 if decision["decision"] in TRAINING_ACTIONS and any(
-                    effective_params(decision["training_config"], previous_count)
-                    == effective_params(attempt["training_config"], previous_count)
+                    effective_search_parameters(decision["training_config"], previous_count)
+                    == effective_search_parameters(attempt["training_config"], previous_count)
                     for attempt in attempts
                 ):
                     raise ValueError(

@@ -31,20 +31,43 @@ def test_split_and_stream_are_reproducible_and_disjoint(dataset, gas_data, tmp_p
 
 @pytest.mark.parametrize("changes", [
     {"learning_rate": True}, {"learning_rate": 999}, {"batch_size": 2.0},
-    {"epochs": "future"}, {"window_size": 0}, {"window_size": 9}, {"window_size": True},
+    {"epochs": "future"}, {"window_size": 0}, {"window_size": 7}, {"window_size": True},
 ])
 def test_invalid_parameters_are_rejected(changes):
-    params = {**WINDOW_TRAINER_CONFIG["training"], **changes}
+    from harness_core.runner import TRAINING_DEFAULTS
+
+    params = {**TRAINING_DEFAULTS, **changes}
     proposal = {"decision": "MIXED_DATA_TRAINING", "reason": "test",
                 "training_config": params, "evaluation_requirements": []}
     with pytest.raises(ValueError):
-        validate(proposal, WINDOW_TRAINER_CONFIG, require_complete=True)
+        validate(proposal, WINDOW_TRAINER_CONFIG)
 
 
 @pytest.mark.parametrize("strategy", ["static", "fixed"])
 def test_retired_comparison_modes_are_rejected(strategy):
     with pytest.raises(ValueError, match="旧对照"):
         RunConfig(strategy=strategy).validate()
+
+
+def test_window_bounds_and_fixed_parameters_across_tasks():
+    from harness_core.rul_policy import validate as validate_rul
+    from harness_core.runner import TRAINING_DEFAULTS, training_window
+
+    plan = {"decision": "MIXED_DATA_TRAINING", "reason": "test",
+            "training_config": {**TRAINING_DEFAULTS, "window_size": 6}}
+    gas_plan = {**plan, "evaluation_requirements": []}
+    a = validate(gas_plan, WINDOW_TRAINER_CONFIG)["training_config"]
+    b = validate_rul(plan, 7, "bearing_rul")["training_config"]
+    c = validate_rul(plan, 7, "cmapss_rul")["training_config"]
+    assert [cfg["batch_size"] for cfg in (a, b, c)] == [64, 128, 256]
+    assert all(cfg["window_size"] == 6 and cfg["early_stopping_patience"] == 5 for cfg in (a, b, c))
+    assert a["weight_decay"] == .0001 and a["class_weighting"] is False
+    assert training_window(7, list(range(7)), 6) == [2, 3, 4, 5, 6, 7]
+    assert training_window(2, [0, 1], 6) == [0, 1, 2]
+    with pytest.raises(ValueError):
+        validate_rul(plan, 0, "cmapss_rul")
+    with pytest.raises(ValueError):
+        validate_rul({**plan, "training_config": {**plan["training_config"], "batch_size": 8}}, 7)
 
 
 def test_saved_window_config_drops_retired_knobs():
@@ -218,8 +241,7 @@ def test_invalid_action_or_zero_window_is_repaired_before_training(dataset, tmp_
 
     def transport(messages):
         calls.append(messages)
-        params = {**WINDOW_TRAINER_CONFIG["training"], "epochs": 2,
-                  "early_stopping_patience": 1, "window_size": 1}
+        params = {"learning_rate": .0003, "epochs": 2, "window_size": 1}
         if len(calls) == 1:
             action = invalid_action
             params = {} if invalid_window is None else {**params, "window_size": invalid_window}

@@ -40,8 +40,8 @@ def test_bearing_fixed_responses_resume_and_history_logging(tmp_path):
         else:
             mixed = bool(context["replay_batches"])
             output = {"decision": "MIXED_DATA_TRAINING" if mixed else "INCREMENTAL_TRAINING",
-                      "reason": "验证固定窗口方案", "training_config": {
-                          "learning_rate": 0.001, "batch_size": 128, "epochs": 5,
+                      "reason": "验证可选窗口方案", "training_config": {
+                          "learning_rate": 0.001, "epochs": 5,
                           "window_size": 4 if mixed else 1}}
         return {"content": json.dumps(output), "prompt_tokens": 10, "completion_tokens": 8}
 

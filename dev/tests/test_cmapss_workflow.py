@@ -26,7 +26,7 @@ def test_cmapss_uses_engine_splits_and_tests_only_after_selection(tmp_path, monk
         observed.append(context)
         return {"content": json.dumps({
             "decision": "INCREMENTAL_TRAINING", "reason": "用 FD001 当前批训练",
-            "training_config": {"learning_rate": 0.001, "batch_size": 256, "epochs": 1, "window_size": 1},
+            "training_config": {"learning_rate": 0.001, "epochs": 1, "window_size": 1},
         })}
 
     config = RunConfig(dataset="cmapss_rul", strategy="llm", swanlab_mode="disabled",

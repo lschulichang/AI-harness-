@@ -1,7 +1,10 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 
 from .llm_client import Planner
-from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
+from .runner import (
+    EARLY_STOPPING_PATIENCE, TRAINING_DEFAULTS, TRAINING_LIMITS, effective_search_parameters,
+    reference_window, search_parameters, validate_search_parameters,
+)
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
@@ -13,16 +16,14 @@ WINDOW_TRAINER_CONFIG = {
     "drift": {"bins": 10, "psi_warning": 0.1, "ks_fdr": 0.05,
               "mmd_samples": 300, "mmd_permutations": 99,
               "label_js_warning": 0.05, "min_samples": 80},
-    "training": {"learning_rate": 0.0003, "batch_size": 64, "epochs": 20,
-                 "early_stopping_patience": 5, "weight_decay": 0.0001,
-                 "class_weighting": False, "window_size": MIXED_TRAINING_WINDOW},
-    "limits": {"learning_rate": [1e-6, 0.01], "batch_size": [8, 512],
-               "epochs": [1, 50], "early_stopping_patience": [1, 15],
-               "weight_decay": [0, 0.01]},
+    "training": {**TRAINING_DEFAULTS, "batch_size": 64,
+                 "early_stopping_patience": EARLY_STOPPING_PATIENCE,
+                 "weight_decay": 0.0001, "class_weighting": False},
+    "limits": TRAINING_LIMITS,
 }
 
 
-def validate(raw, cfg, *, require_complete=False):
+def validate(raw, cfg):
     if not isinstance(raw, dict) or set(raw) != {"decision", "reason", "training_config", "evaluation_requirements"}:
         raise ValueError("decision must have exactly the required JSON keys")
     if (not isinstance(raw["decision"], str) or raw["decision"] not in DECISIONS
@@ -32,32 +33,14 @@ def validate(raw, cfg, *, require_complete=False):
     if not isinstance(requirements, list) or not all(isinstance(value, str) for value in requirements):
         raise ValueError("invalid evaluation requirements")
     supplied = raw["training_config"]
-    training_keys = cfg["training"].keys()
-    if not isinstance(supplied, dict) or set(supplied) - training_keys:
-        raise ValueError("invalid training configuration keys")
+    if not isinstance(supplied, dict):
+        raise ValueError("invalid training configuration")
     if raw["decision"] not in TRAINING_ACTIONS:
         if supplied:
             raise ValueError("nontraining decision must have empty training_config")
         return raw
-    if require_complete and set(supplied) - {"window_size"} != training_keys - {"window_size"}:
-        raise ValueError("training_config must explicitly contain every training parameter")
-    config = {**cfg["training"], **supplied}
-    # Older model replies may still include a width. It never controls replay.
-    if "window_size" in supplied and (type(supplied["window_size"]) is not int
-                                     or not 1 <= supplied["window_size"] <= 8):
-        raise ValueError("invalid legacy window_size")
-    for key, (lower, upper) in cfg["limits"].items():
-        value = config[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not lower <= value <= upper:
-            raise ValueError(f"{key} is outside configured bounds")
-    for key in ("batch_size", "epochs", "early_stopping_patience"):
-        if type(config[key]) is not int:
-            raise ValueError(f"{key} must be an integer")
-    if type(config["class_weighting"]) is not bool:
-        raise ValueError("class_weighting must be boolean")
-    config["window_size"] = window_size_for_action(raw["decision"])
-    raw["training_config"] = config
-    return raw
+    validate_search_parameters(supplied, raw["decision"])
+    return {**raw, "training_config": {**cfg["training"], **supplied}}
 
 
 def rules(context, cfg):
@@ -74,7 +57,7 @@ def rules(context, cfg):
         decision, reason = "INCREMENTAL_TRAINING", "Drift or performance decline; replay unavailable"
     return validate({
         "decision": decision, "reason": reason,
-        "training_config": dict(cfg["training"]) if decision in TRAINING_ACTIONS else {},
+        "training_config": {**search_parameters(cfg["training"]), "window_size": reference_window(decision)} if decision in TRAINING_ACTIONS else {},
         "evaluation_requirements": ["new_data_macro_f1", "per_class_recall"],
     }, cfg)
 
@@ -83,17 +66,13 @@ WINDOW_PROMPT = (
     "/no_think Return only concise JSON with exactly decision, reason, training_config, "
     "evaluation_requirements. Choose NO_UPDATE, INCREMENTAL_TRAINING or "
     "MIXED_DATA_TRAINING. Use training_config={} when skipping. For a candidate explicitly return "
-    "learning_rate, batch_size, epochs, early_stopping_patience, weight_decay and class_weighting "
-    "within training_limits. Omit window_size; the harness sets it from the action. "
-    f"Incremental training uses the current batch. Mixed training uses the current batch and up to {MIXED_TRAINING_WINDOW - 1} newest historical batches. "
+    "only learning_rate, epochs and window_size within training_limits. "
+    "A window counts the current batch. Use 1 for incremental training and 2–6 for mixed training. "
+    "For mixed training use the latest available history, up to window_size - 1 batches. "
     "Do not choose mixed training without any replay batches. evaluation_requirements must be an array of "
     "strings. Missing drift reference or labels mean the corresponding evidence is unavailable. "
     "Use validation evidence only. Do not claim held-out results or output code or commands."
 )
-
-
-def effective_params(params, replay_count):
-    return {**params, "window_size": min(params["window_size"], replay_count + 1)}
 
 
 def compact_input(context, cfg):
@@ -124,7 +103,7 @@ def compact_input(context, cfg):
              "drifted_feature_count": row["drifted_feature_count"]}
             for row in context["history"][:3]
         ],
-        "training_defaults": {key: value for key, value in cfg["training"].items() if key != "window_size"}, "training_limits": cfg["limits"],
+        "training_defaults": search_parameters(cfg["training"]), "training_limits": cfg["limits"],
     }
 
 
@@ -137,8 +116,11 @@ class GasTrainer(Planner):
         prompt = WINDOW_PROMPT
         attempts = []
         if feedback is not None:
-            payload["batch_feedback"] = feedback
             attempts = feedback["attempts"]
+            payload["batch_feedback"] = {**feedback, "attempts": [
+                {**attempt, "training_config": search_parameters(attempt["training_config"])}
+                for attempt in attempts
+            ]}
             prompt += (
                 " Each decision requests at most one candidate. All candidates start from the same batch-entry model. "
                 "Review batch_feedback for actual validation, selection status, gate failures, sample passes and remaining budgets. "
@@ -154,13 +136,13 @@ class GasTrainer(Planner):
         decision, error = None, ""
         if self.config.strategy == "llm":
             def check(value):
-                decision = validate(value, cfg, require_complete=True)
+                decision = validate(value, cfg)
                 if decision["decision"] == "MIXED_DATA_TRAINING" and not payload["replay_available"]:
                     raise ValueError("mixed training requires replay samples")
                 previous_count = len(payload.get("replay_batches", ()))
                 if decision["decision"] in TRAINING_ACTIONS and any(
-                        effective_params(decision["training_config"], previous_count)
-                        == effective_params(attempt["training_config"], previous_count) for attempt in attempts):
+                        effective_search_parameters(decision["training_config"], previous_count)
+                        == effective_search_parameters(attempt["training_config"], previous_count) for attempt in attempts):
                     raise ValueError("this training configuration has already been tried in the current batch")
                 return decision
 

@@ -13,7 +13,7 @@ from .feature_drift import detect_features
 from .history_evaluation import history_batches, rul_references, rul_scores
 from .portability import resolve_model_path
 from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults
-from .runner import candidate_feedback, training_window
+from .runner import candidate_feedback, search_parameters, training_window
 from .storage import read_json
 
 POLICY = "bearing_window_v2"
@@ -229,7 +229,7 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, his
              "drifted_feature_count": len(row["feature_drift"]["drifted_features"])}
             for row in reversed(history[-3:])
         ],
-        "training_defaults": training_defaults(config.dataset), "training_limits": LIMITS,
+        "training_defaults": search_parameters(training_defaults(config.dataset)), "training_limits": LIMITS,
     }
     attempts, plans = [], []
     stop_reason = "candidate_limit"
@@ -243,7 +243,8 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, his
             break
         feedback = {
             "attempts": [
-                {field: value for field, value in trial.items() if field != "history_validation"}
+                {**{field: value for field, value in trial.items() if field != "history_validation"},
+                 "effective_config": search_parameters(trial["effective_config"])}
                 for trial in attempts
             ],
             "remaining_candidates": config.candidate_limit - number + 1,
