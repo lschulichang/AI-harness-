@@ -1,6 +1,7 @@
 """滑动窗口训练师的结构化提案、校验与规则兜底。"""
 
 from .llm_client import Planner
+from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
 
 DECISIONS = {"NO_UPDATE", "INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
@@ -15,10 +16,10 @@ WINDOW_TRAINER_CONFIG = {
               "label_js_warning": 0.05, "min_samples": 80},
     "training": {"learning_rate": 0.0003, "batch_size": 64, "epochs": 20,
                  "early_stopping_patience": 5, "weight_decay": 0.0001,
-                 "class_weighting": False, "window_size": 4},
+                 "class_weighting": False, "window_size": MIXED_TRAINING_WINDOW},
     "limits": {"learning_rate": [1e-6, 0.01], "batch_size": [8, 512],
                "epochs": [1, 50], "early_stopping_patience": [1, 15],
-               "weight_decay": [0, 0.01], "window_size": [1, 8]},
+               "weight_decay": [0, 0.01]},
 }
 
 
@@ -39,24 +40,23 @@ def validate(raw, cfg, *, require_complete=False):
         if supplied:
             raise ValueError("nontraining decision must have empty training_config")
         return raw
-    if require_complete and set(supplied) != training_keys:
+    if require_complete and set(supplied) - {"window_size"} != training_keys - {"window_size"}:
         raise ValueError("training_config must explicitly contain every training parameter")
     config = {**cfg["training"], **supplied}
+    # Older model replies may still include a width. It never controls replay.
+    if "window_size" in supplied and (type(supplied["window_size"]) is not int
+                                     or not 1 <= supplied["window_size"] <= 8):
+        raise ValueError("invalid legacy window_size")
     for key, (lower, upper) in cfg["limits"].items():
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not lower <= value <= upper:
             raise ValueError(f"{key} is outside configured bounds")
-    for key in ("batch_size", "epochs", "early_stopping_patience", "window_size"):
+    for key in ("batch_size", "epochs", "early_stopping_patience"):
         if type(config[key]) is not int:
             raise ValueError(f"{key} must be an integer")
     if type(config["class_weighting"]) is not bool:
         raise ValueError("class_weighting must be boolean")
-    if raw["decision"] == "INCREMENTAL_TRAINING":
-        if require_complete and config["window_size"] > 1:
-            raise ValueError("incremental training requires window_size=1")
-        config["window_size"] = 1
-    elif config["window_size"] < 2:
-        raise ValueError("mixed training requires window_size >= 2")
+    config["window_size"] = window_size_for_action(raw["decision"])
     raw["training_config"] = config
     return raw
 
@@ -84,10 +84,9 @@ WINDOW_PROMPT = (
     "/no_think Return only concise JSON with exactly decision, reason, training_config, "
     "evaluation_requirements. Choose NO_UPDATE, INCREMENTAL_TRAINING or "
     "MIXED_DATA_TRAINING. Use training_config={} when skipping. For a candidate explicitly return "
-    "learning_rate, batch_size, epochs, early_stopping_patience, weight_decay, window_size and class_weighting "
-    "within training_limits. For incremental training use window_size=1 (current batch only). "
-    "For mixed training use an integer window_size of 2–8, including the current batch and the most "
-    "recent available batches in replay_batches. The window is shortened if history is insufficient. "
+    "learning_rate, batch_size, epochs, early_stopping_patience, weight_decay and class_weighting "
+    "within training_limits. Omit window_size; the harness sets it from the action. "
+    f"Incremental training uses the current batch. Mixed training uses the current batch and up to {MIXED_TRAINING_WINDOW - 1} newest historical batches. "
     "Do not choose mixed training without any replay batches. evaluation_requirements must be an array of "
     "strings. Missing drift reference or labels mean the corresponding evidence is unavailable. "
     "Use validation evidence only. Do not claim held-out results or output code or commands."
@@ -126,7 +125,7 @@ def compact_input(context, cfg):
              "drifted_feature_count": row["drifted_feature_count"]}
             for row in context["history"][:3]
         ],
-        "training_defaults": cfg["training"], "training_limits": cfg["limits"],
+        "training_defaults": {key: value for key, value in cfg["training"].items() if key != "window_size"}, "training_limits": cfg["limits"],
     }
 
 

@@ -129,7 +129,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
         should_train = 2 <= len(payloads) <= 5
         plan = {**params, "batch_size": 96 + len(attempts), "epochs": 2 + len(attempts)}
         if len(payloads) == 3:
-            # Both widths truncate to the same two batches. Retry without training it.
+            # The reported legacy width is ignored, leaving the same effective plan.
             plan = {**params, "window_size": 8}
         return {"content": json.dumps({
             "decision": "MIXED_DATA_TRAINING" if should_train else "NO_UPDATE",
@@ -173,7 +173,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     assert feedback["max_historical_macro_f1_drop"] == result["gas_trainer_max_history_drop"]
     assert feedback["min_current_validation_macro_f1"] == .95
     assert "min_current_macro_f1_gain" not in feedback
-    assert feedback["attempts"][0]["training_config"] == params
+    assert feedback["attempts"][0]["training_config"] == {**params, "window_size": 3}
     assert not feedback["attempts"][0]["eligible"]
     assert feedback["attempts"][0]["worst_historical_group"]["drop"] == .35
     assert "历史验证退化超限" in feedback["attempts"][0]["reason"]

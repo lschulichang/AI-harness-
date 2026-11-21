@@ -1,10 +1,11 @@
 """B、C 回归训练师的白名单参数和候选反馈。"""
 from .llm_client import Planner
+from .runner import MIXED_TRAINING_WINDOW, window_size_for_action
 
 TRAINING_ACTIONS = {"INCREMENTAL_TRAINING", "MIXED_DATA_TRAINING"}
 LIMITS = {"learning_rate": (1e-6, 0.01), "batch_size": (8, 512),
-          "epochs": (1, 50), "window_size": (1, 8)}
-DEFAULTS = {"learning_rate": 0.001, "batch_size": 128, "epochs": 5, "window_size": 4}
+          "epochs": (1, 50)}
+DEFAULTS = {"learning_rate": 0.001, "batch_size": 128, "epochs": 5}
 SYSTEM = (
     "current_validation 始终是本批入口模型的验证指标，不能当作任何候选的结果。"
     "batch_feedback.attempts 为空时意味着本批尚未试训，不能据此判定续训没有收益或没有通过选模门槛。"
@@ -13,8 +14,8 @@ SYSTEM = (
     "每次提案只训练一个候选，都从同一批初模型出发，只使用当前和已开放的训练数据。"
     "仅返回简洁 JSON，字段为 decision、reason、training_config。"
     "动作可为 NO_UPDATE、INCREMENTAL_TRAINING、MIXED_DATA_TRAINING。"
-    "跳过或停止时 training_config 为 {}；训练须给出白名单全部四个参数。"
-    "仅本批续训使用 window_size=1；有历史回放才可混合续训，window_size 至少为 2。"
+    "跳过或停止时 training_config 为 {}；训练须给出 learning_rate、batch_size、epochs。不要返回 window_size。"
+    f"仅本批续训使用当前批。混合续训时，程序固定使用本批和最多最近 {MIXED_TRAINING_WINDOW - 1} 批历史训练数据。没有历史时不能选混合续训。"
 )
 FEEDBACK = (
     " 本批已有候选结果。查看实际当前验证、历史退化和剩余预算。"
@@ -42,7 +43,8 @@ def rules(context, defaults):
     else:
         return {"decision": "MIXED_DATA_TRAINING" if replay else "INCREMENTAL_TRAINING",
                 "reason": "尝试保守续训，由实际候选验证结果决定是否采用",
-                "training_config": {**defaults, "window_size": defaults["window_size"] if replay else 1}}
+                "training_config": {**defaults, "window_size": window_size_for_action(
+                    "MIXED_DATA_TRAINING" if replay else "INCREMENTAL_TRAINING")}}
     return {"decision": "NO_UPDATE", "reason": reason, "training_config": {}}
 
 
@@ -58,18 +60,19 @@ def validate(proposal, history_count):
         if params:
             raise ValueError("保留模型时训练参数必须为空")
         return proposal
-    if set(params) != LIMITS.keys():
+    if set(params) - {"window_size"} != LIMITS.keys():
         raise ValueError("训练配置不符合 RUL 白名单")
     for name, (low, high) in LIMITS.items():
         value = params[name]
         types = (int, float) if name == "learning_rate" else (int,)
         if type(value) not in types or not low <= value <= high:
             raise ValueError(f"{name} 超出允许范围")
-    if action == "INCREMENTAL_TRAINING" and params["window_size"] != 1:
-        raise ValueError("仅本批续训的窗口必须为 1")
-    if action == "MIXED_DATA_TRAINING" and (not history_count or params["window_size"] < 2):
-        raise ValueError("混合训练须有历史数据且窗口至少为 2")
-    return proposal
+    if "window_size" in params and (type(params["window_size"]) is not int
+                                   or not 1 <= params["window_size"] <= 8):
+        raise ValueError("旧窗口字段无效")
+    if action == "MIXED_DATA_TRAINING" and not history_count:
+        raise ValueError("混合训练须有历史数据")
+    return {**proposal, "training_config": {**params, "window_size": window_size_for_action(action)}}
 
 
 class RulTrainer(Planner):

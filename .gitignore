@@ -1,1 +1,6 @@
 harness/*.tar
+
+# Contest Docker archives are kept outside Git.
+/staging/mirror/
+/staging/*.tar
+/staging/*.tar.gz

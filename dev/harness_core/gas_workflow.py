@@ -38,15 +38,10 @@ def checked_path(root, entry):
 #启动一次 A 气体分类候选模型的训练
 def train_candidate(config, parent, output, train, validation, request):
     output.parent.mkdir(exist_ok=True)
-    env = os.environ.copy()
-    for key in (
-        config.api_key_env,
-        "PYTRIO_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "SWANLAB_API_KEY",
-        "PYTHONPATH",
-    ):
-        env.pop(key, None)
+    env = {
+        name: value for name, value in os.environ.items()
+        if name not in {config.api_key_env, "PYTHONPATH"} and not name.endswith("_API_KEY")
+    }
     env.update(
         BASELINE_CPU_THREADS="1",
         OPENBLAS_NUM_THREADS="1",
