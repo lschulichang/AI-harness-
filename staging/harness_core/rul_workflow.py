@@ -10,6 +10,7 @@ import numpy as np
 from wrappers.rul_baseline import digest
 
 from .feature_drift import detect_features
+from .history_evaluation import history_batches, rul_references, rul_scores
 from .portability import resolve_model_path
 from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults
 from .runner import training_window
@@ -21,7 +22,6 @@ RUL_POLICIES = {
     "cmapss_rul": ("cmapss_trainer_policy", "cmapss_window_v1"),
 }
 DRIFT_WINDOW = 3
-HISTORY_WINDOW = 6
 VALIDATION_TARGET_WINDOW = 4
 DRIFT = {"bins": 10, "psi_warning": 0.1, "ks_fdr": 0.05, "mmd_samples": 300, "mmd_permutations": 99}
 
@@ -41,26 +41,13 @@ def checked_path(root, record, adapter):
     return path
 
 
-def history_scores(adapter, model, history):
-    scores = []
-    for group, samples, entry_rmse in history:
-        candidate = adapter.metrics(model, samples)["rmse"]
-        scores.append({"group": group, "entry_rmse": entry_rmse, "candidate_rmse": candidate,
-                       "relative_increase": (candidate - entry_rmse) / max(entry_rmse, 1e-12)})
-    return scores
-
-
-def gate_failures(config, before, candidate, scores, *, target=None):
+def gate_failures(config, before, candidate, *, target=None):
     failures = []
     if candidate >= before - 1e-12 or (
             target is None and candidate > before * (1 - config.rul_min_relative_gain) + 1e-12):
         failures.append("current_gain_insufficient")
     if target is not None and candidate > target + 1e-12:
         failures.append("validation_target_not_met")
-    # 暂停历史退化门槛，历史验证结果仍写入实验记录。
-    # if any(row["candidate_rmse"] > row["entry_rmse"] * (1 + config.rul_max_history_increase) + 1e-12
-    #        for row in scores):
-    #     failures.append("history_regression")
     return failures
 
 
@@ -157,8 +144,8 @@ def run_candidate(config, adapter, root, ledger, tracker, batch, plan, window, e
         score = adapter.metrics(model, validation)
         if measure_candidate is not None:
             score = measure_candidate(output, score, plan, model.meta["seed"], names)
-        scores = history_scores(adapter, model, history)
-        failures = gate_failures(config, before, score["rmse"], scores, target=target)
+        scores = rul_scores(adapter, model, history)
+        failures = gate_failures(config, before, score["rmse"], target=target)
         gain = (before - score["rmse"]) / max(before, 1e-12)
         trial.update(status="success", **score, artifact=artifact, checkpoint_sha256=artifact["checkpoint_sha256"],
                      current_relative_gain=gain, history_validation=scores, gate_failures=failures,
@@ -199,10 +186,8 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
     before = adapter.metrics(entry_model, validation)
     static = adapter.metrics(baseline, validation)
     completed = [row["batch"] for row in history]
-    references = []
-    for previous in history[-HISTORY_WINDOW:]:
-        samples = adapter.samples(previous["batch"])
-        references.append((previous["source_file"], samples, adapter.metrics(entry_model, samples)["rmse"]))
+    historical_batches = history_batches(history, enabled=config.evaluate_history)
+    references = rul_references(adapter, historical_batches, entry_model)
     target_batches = history[-VALIDATION_TARGET_WINDOW:]
     validation_target = mean(row["validation_rmse"] for row in target_batches) if target_batches else None
     drift = feature_drift(adapter, batch, completed, config.seed + batch)
@@ -270,7 +255,7 @@ def run_batch(config, adapter, root, ledger, tracker, planner, batch, entry, bas
     selected_model = adapter.load_model(checked_path(root, selected, adapter))
     score = ({key: best[key] for key in ("rmse", "mae")} if best and measure_candidate is not None
              else adapter.metrics(selected_model, validation))
-    past = history_scores(adapter, selected_model, references)
+    past = rul_scores(adapter, selected_model, references)
     row = {"batch": batch, "source_file": name, "train_samples": train_samples,
            "validation_samples": len(validation["y"]), "entry": entry, "selected": selected,
            "before_model_path": entry["model_path"], "promoted": best is not None,

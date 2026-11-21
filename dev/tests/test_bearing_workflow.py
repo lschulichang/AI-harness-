@@ -10,13 +10,12 @@ from wrappers.bearing_baseline import digest
 
 def test_bearing_relative_thresholds():
     config = RunConfig(dataset="bearing_rul").validate()
-    assert gate_failures(config, 100, 99, [{"entry_rmse": 80, "candidate_rmse": 120}]) == []
-    assert gate_failures(config, 100, 98, [{"entry_rmse": 80, "candidate_rmse": 200}]) == []
-    assert gate_failures(config, 100, 99.01, []) == ["current_gain_insufficient"]
-    assert gate_failures(config, 0, 0, []) == ["current_gain_insufficient"]
-    assert gate_failures(config, 100, 99.5, [], target=99.5) == []
-    assert gate_failures(config, 100, 99.5, [], target=90) == ["validation_target_not_met"]
-    assert gate_failures(config, 100, 101, [], target=200) == ["current_gain_insufficient"]
+    assert gate_failures(config, 100, 99) == []
+    assert gate_failures(config, 100, 99.01) == ["current_gain_insufficient"]
+    assert gate_failures(config, 0, 0) == ["current_gain_insufficient"]
+    assert gate_failures(config, 100, 99.5, target=99.5) == []
+    assert gate_failures(config, 100, 99.5, target=90) == ["validation_target_not_met"]
+    assert gate_failures(config, 100, 101, target=200) == ["current_gain_insufficient"]
 
 
 def test_bearing_prefers_target_and_only_falls_back_to_current_improvement():
@@ -48,7 +47,7 @@ def test_bearing_fixed_responses_resume_and_history_logging(tmp_path):
 
     config = RunConfig(dataset="bearing_rul", strategy="llm", swanlab_mode="disabled",
                        data_dir="baseline/cpu-b-rul-20261110-v1",
-                       max_experiments=2, max_api_calls=3, rul_max_history_increase=0.05)
+                       max_experiments=2, max_api_calls=3, evaluate_history=True)
     partial = run_workflow(config, runs_root=tmp_path, transport=transport, stop_after=1)
     assert not partial["complete"] and partial["batches_completed"] == 0
     assert partial["experiments"] == len(seen) == 1
@@ -74,7 +73,7 @@ def test_bearing_fixed_responses_resume_and_history_logging(tmp_path):
     assert two["promoted"] == (candidate["rmse"] < two["before_validation_rmse"] - 1e-12)
     historical = two["trainer_attempts"][0]["history_validation"][0]
     assert historical["entry_rmse"] == one["validation_rmse"]
-    assert historical["relative_increase"] > config.rul_max_history_increase
+    assert historical["relative_increase"] > 0.05
     assert one["selected"] == two["entry"] and two["selected"] == three["entry"]
     assert "history_validation" not in feedback
     assert "max_historical_relative_rmse_increase" not in seen[1]["batch_feedback"]

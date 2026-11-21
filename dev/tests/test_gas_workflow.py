@@ -85,7 +85,8 @@ def test_trainer_executes_one_complete_decision_and_resumes(dataset, tmp_path, m
     assert by_name["batch2.dat"]["test_protocol"] == "development_holdout_previously_public"
     assert by_name["batch5.dat"]["drift_reference_batches"] == ["batch2.dat", "batch3.dat", "batch4.dat"]
     assert by_name["batch6.dat"]["drift_reference_batches"] == ["batch3.dat", "batch4.dat", "batch5.dat"]
-    assert by_name["batch10.dat"]["history_validation_batches"] == [f"batch{i}.dat" for i in range(4, 10)]
+    assert all(batch["history_validation_batches"] == [] for batch in batches)
+    assert all(row["history_drop"] is None for row in read_json(root / "history.json")["trials"])
     assert result["drift_profiled_batches"] == 8 and result["drift_no_reference_batches"] == 1
     drift = read_json(root / "reports/batch3/drift.json")
     assert len(drift["features"]) == dataset.feature_count
@@ -144,7 +145,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
                        "b03-trainer-t03": (.96, .02)}[trial_id]
         gain = score - args[7]["macro_f1"]
         scores = [{**scores[0], "candidate_macro_f1": scores[0]["entry_macro_f1"] - drop, "drop": drop}]
-        failures = workflow.candidate_gate_failures(args[0], score, gain, drop, kwargs["min_validation_f1"])
+        failures = workflow.candidate_gate_failures(args[0], score, gain, kwargs["min_validation_f1"])
         return {**candidate, "validation": {**candidate["validation"], "macro_f1": score}}, {
             **result, "macro_f1": score, "history_drop": drop, "gate_failures": failures,
         }, not failures, gain, scores
@@ -158,7 +159,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     monkeypatch.setattr(workflow, "evaluate_candidate", evaluate_candidate)
     monkeypatch.setattr(workflow, "evaluate", test_evaluate)
     config = RunConfig(strategy="llm", data_dir=str(dataset.root), swanlab_mode="disabled",
-                       trials_per_batch=4, gas_trainer_min_validation_f1=.95)
+                       trials_per_batch=4, gas_trainer_min_validation_f1=.95, evaluate_history=True)
     root, partial = run_workflow(config, runs_root=tmp_path, transport=transport, stop_after=1)
     assert not partial["complete"]
     assert partial["batches_completed"] == partial["experiments"] == 1 and partial["api_calls"] == 2
@@ -183,6 +184,7 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     batch = read_json(root / "audit_test_results.json")[1]
     assert batch["experiment_count"] == 3 and batch["stop_reason"] == "trainer_stop"
     assert batch["selected_trial_id"] == "b03-trainer"
+    assert batch["history_validation_batches"] == ["batch2.dat"]
     assert batch["model_path"] == "experiments/b03-trainer/checkpoint.npz"
     trials = read_json(root / "history.json")["trials"]
     assert trials[0]["history_drop"] == .35 and trials[0]["gate_failures"] == []
@@ -191,21 +193,18 @@ def test_feedback_resumes_and_keeps_best_eligible_candidate(dataset, tmp_path, m
     assert [trial["params"]["epochs"] for trial in trials] == [2, 3, 4]
 
 
-def test_trainer_absolute_gate_ignores_history_drop():
+def test_trainer_absolute_gate_uses_current_validation():
     from harness_core.gas_workflow import candidate_gate_failures
 
     cfg = RunConfig(gas_trainer_min_validation_f1=.95)
     target = cfg.gas_trainer_min_validation_f1
-    assert candidate_gate_failures(cfg, .95, .005, .20, target) == []
-    assert candidate_gate_failures(cfg, .96, -.02, 0, target) == []
-    assert candidate_gate_failures(cfg, .96, -.02, 0, target, require_improvement=True) == [
+    assert candidate_gate_failures(cfg, .95, .005, target) == []
+    assert candidate_gate_failures(cfg, .96, -.02, target) == []
+    assert candidate_gate_failures(cfg, .96, -.02, target, require_improvement=True) == [
         "当前验证 Macro-F1 未优于批初模型"]
-    assert candidate_gate_failures(cfg, .949, .24, 0, target) == ["当前验证 Macro-F1 未达到 95.00%"]
-    assert candidate_gate_failures(cfg, .99, .24, .201, target) == []
-    assert candidate_gate_failures(cfg, .94, .24, 0, None) == []
-    assert candidate_gate_failures(cfg, .95, .02, .15, target, max_history_drop=.15) == []
-    assert candidate_gate_failures(cfg, .95, .02, None, target, max_history_drop=.15) == []
-    assert candidate_gate_failures(cfg, .95, .02, .151, target, max_history_drop=.15) == []
+    assert candidate_gate_failures(cfg, .949, .24, target) == ["当前验证 Macro-F1 未达到 95.00%"]
+    assert candidate_gate_failures(cfg, .94, .24, None) == []
+    assert candidate_gate_failures(cfg, .94, .005, None) == ["当前验证增益不足"]
 
 def test_trainer_reads_alternate_checkpoint_dimensions(tmp_path):
     import numpy as np
@@ -324,8 +323,7 @@ def test_below_target_selects_best_safe_candidate_above_entry(dataset, tmp_path,
             "b03-trainer-t04": (entry_score, .01),  # A tie with the entry model.
         }[trial_id]
         gain = score - entry_score
-        failures = workflow.candidate_gate_failures(args[0], score, gain, drop, kwargs["min_validation_f1"],
-                                                    max_history_drop=kwargs["max_history_drop"])
+        failures = workflow.candidate_gate_failures(args[0], score, gain, kwargs["min_validation_f1"])
         return {**candidate, "validation": {**candidate["validation"], "macro_f1": score}}, {
             **trial, "macro_f1": score, "history_drop": drop, "gate_failures": failures,
         }, not failures, gain, histories

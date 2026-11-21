@@ -19,9 +19,9 @@ from .gas_policy import (
     TRAINING_ACTIONS,
     WINDOW_DRIFT_BATCHES,
     WINDOW_TRAINER_CONFIG,
-    WINDOW_VALIDATION_BATCHES,
     GasTrainer,
 )
+from .history_evaluation import gas_references, gas_scores, history_batches
 from .portability import resolve_model_path
 from .resource_monitor import BatchMeter
 from .runner import training_window
@@ -87,10 +87,8 @@ def candidate_gate_failures(
     config,
     macro_f1,
     gain,
-    history_drop,
     min_validation_f1,
     *,
-    max_history_drop=None,
     require_improvement=False,
 ):
     failures = []
@@ -102,10 +100,6 @@ def candidate_gate_failures(
             failures.append(f"当前验证 Macro-F1 未达到 {min_validation_f1:.2%}")
         if require_improvement and gain <= 1e-12:
             failures.append("当前验证 Macro-F1 未优于批初模型")
-    # 暂停历史退化门槛，历史验证结果仍写入实验记录。
-    # limit = config.max_history_drop if max_history_drop is None else max_history_drop
-    # if history_drop is not None and history_drop > limit + 1e-12:
-    #     failures.append("历史验证退化超限")
     return failures
 
 
@@ -121,7 +115,6 @@ def evaluate_candidate(
     history,
     *,
     min_validation_f1,
-    max_history_drop=None,
     require_improvement=False,
     measure_candidate=None,
 ):
@@ -151,26 +144,14 @@ def evaluate_candidate(
     if measure_candidate is not None:
         score = measure_candidate(output, score)
     gain = score["macro_f1"] - current["macro_f1"]
-    history_scores = []
-    for name, samples, previous in history:
-        candidate_f1 = evaluate_samples(path, samples)["macro_f1"]
-        history_scores.append(
-            {
-                "source": name,
-                "entry_macro_f1": previous["macro_f1"],
-                "candidate_macro_f1": candidate_f1,
-                "drop": previous["macro_f1"] - candidate_f1,
-            }
-        )
+    history_scores = gas_scores(path, history)
     worst = max(history_scores, key=lambda item: item["drop"], default=None)
     drop = worst["drop"] if worst else None
     failures = candidate_gate_failures(
         config,
         score["macro_f1"],
         gain,
-        drop,
         min_validation_f1,
-        max_history_drop=max_history_drop,
         require_improvement=require_improvement,
     )
     accepted = not failures
@@ -216,7 +197,6 @@ def run_batch_trial(
     *,
     feedback_enabled,
     min_validation_f1,
-    max_history_drop=None,
     training_batches=(),
     allow_best_below_target=False,
     require_improvement=False,
@@ -316,7 +296,6 @@ def run_batch_trial(
             current,
             history,
             min_validation_f1=min_validation_f1,
-            max_history_drop=max_history_drop,
             require_improvement=require_improvement,
             measure_candidate=measure if measure_candidate is not None else None,
         )
@@ -405,7 +384,7 @@ def run_batch_search(
     train,
     validation,
     current,
-    histories,
+    historical_batches,
     data_id,
     context,
     directory,
@@ -420,7 +399,6 @@ def run_batch_search(
 ):
     feedback_enabled = config.strategy == "llm"
     trainer_config = WINDOW_TRAINER_CONFIG
-    max_history_drop = policy.get("max_history_drop", config.max_history_drop)
     limit = policy["max_candidates_per_batch"]
     require_improvement = "validation_target_window" in policy
     history = None
@@ -479,10 +457,7 @@ def run_batch_search(
             break
 
         if history is None:
-            history = [
-                (group, rows, evaluate_samples(entry_path, rows))
-                for group, rows in histories
-            ]
+            history = gas_references(data, historical_batches, entry_path)
         window = training_window(
             batch, completed, plan["output"]["training_config"]["window_size"]
         )
@@ -508,7 +483,6 @@ def run_batch_search(
             data_id,
             feedback_enabled=feedback_enabled,
             min_validation_f1=min_validation_f1,
-            max_history_drop=max_history_drop,
             training_batches=training_batches,
             allow_best_below_target=allow_best_below_target,
             require_improvement=require_improvement,
@@ -588,19 +562,18 @@ def run_trainer_batches(
     model_meta = Model.load(baseline).meta
     policy = manifest["gas_trainer_policy"]
     target_window = policy.get("validation_target_window")
-    histories, completed, decision_history = [], [], []
+    completed, decision_history = [], []
     try:
         for batch in batches:
             batch_key = f"{batch:02d}"
-            validation = gas_samples(data, batch, "validation")
-            name = data.batch_names[batch]
             saved = ledger.get("batch", batch_key)
             if saved is not None:
                 active = saved["selected"]
                 decision_history.insert(0, saved["trainer_history"])
-                histories.append((name, validation))
                 completed.append(batch)
                 continue
+            name = data.batch_names[batch]
+            validation = gas_samples(data, batch, "validation")
             trial_id = f"b{batch + 1:02d}-trainer"
             meter.start(
                 batch, at_entry=ledger.get("trainer_decision", trial_id) is None
@@ -633,7 +606,7 @@ def run_trainer_batches(
                 "status": drift["status"],
                 "reference_batches": drift["reference_batches"],
             }
-            candidate_histories = histories[-WINDOW_VALIDATION_BATCHES:]
+            historical_batches = history_batches(completed, enabled=config.evaluate_history)
             replay_batches = [data.batch_names[i] for i in completed[-7:]]
             context = {
                 "drift_report": drift_report,
@@ -668,7 +641,7 @@ def run_trainer_batches(
                 train,
                 validation,
                 current,
-                candidate_histories,
+                historical_batches,
                 manifest["raw_gas"]["dataset_id"],
                 context,
                 directory,
@@ -756,7 +729,7 @@ def run_trainer_batches(
                 },
                 "drift_reference_batches": drift["reference_batches"],
                 "history_validation_batches": [
-                    group for group, _ in candidate_histories
+                    data.batch_names[index] for index in historical_batches
                 ],
                 "test_protocol": "development_holdout_previously_public"
                 if batch == 1
@@ -778,7 +751,6 @@ def run_trainer_batches(
                 ]
             ledger.put("batch", batch_key, row)
             tracker.log_batch(row)
-            histories.append((name, validation))
             completed.append(batch)
             decision_history.insert(0, row["trainer_history"])
             print(

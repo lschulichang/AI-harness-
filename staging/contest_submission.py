@@ -34,10 +34,10 @@ from harness_core.gas_policy import (
     WINDOW_POLICY,
     WINDOW_TARGET_BATCHES,
     WINDOW_TRAINER_CONFIG,
-    WINDOW_VALIDATION_BATCHES,
     GasTrainer,
 )
 from harness_core.gas_workflow import rolling_drift, run_batch_search
+from harness_core.history_evaluation import history_batches
 from harness_core.rul_policy import RulTrainer
 from harness_core.rul_workflow import RUL_POLICIES, checkpoint, run_batch
 from harness_core.storage import Ledger, atomic_json
@@ -165,14 +165,12 @@ def train_gas(config, rnd, root, ledger, tracker, projection, entry, parent_mode
         "history": [row["trainer_history"] for row in reversed(history)],
         "validation_target": target,
     }
-    histories = [(data.batch_names[i], gas_samples(data, i, "validation"))
-                 for i in completed[-WINDOW_VALIDATION_BATCHES:]]
+    historical_batches = history_batches(completed, enabled=config.evaluate_history)
     policy = {"max_candidates_per_batch": config.candidate_limit,
-              "max_history_drop": config.max_history_drop,
               "validation_target_window": WINDOW_TARGET_BATCHES, "allow_best_below_target": True}
     best, plans, attempts, stop_reason = run_batch_search(
         config, root, ledger, tracker, GasTrainer(config, ledger, transport), batch, entry, entry_path,
-        parent_model, train, validation, current, histories, f"A-round-{rnd.round_index}",
+        parent_model, train, validation, current, historical_batches, f"A-round-{rnd.round_index}",
         context, root / "reports", policy, None,
         min_validation_f1=target, data=data, completed=completed, measure_candidate=measure,
         combine_candidate_training=combine_gas_candidate,
@@ -197,7 +195,7 @@ def train_gas(config, rnd, root, ledger, tracker, projection, entry, parent_mode
         "selected_below_target": bool(best and best.get("selected_below_target")), "stop_reason": stop_reason,
         "training_sample_passes": sum(trial["sample_passes"] for trial in attempts),
         "drift_reference_batches": drift["reference_batches"],
-        "history_validation_batches": [name for name, _ in histories],
+        "history_validation_batches": [data.batch_names[index] for index in historical_batches],
         "trainer_validation_target_batches": [item["source_file"] for item in target_batches],
         "feature_drift": {
             "mean_psi": mean(item["psi"] for item in drift["features"]) if drift["features"] else None,
@@ -245,7 +243,8 @@ def train(rnd):
         raise ValueError("父检查点摘要与轮次合同不一致")
     policy = WINDOW_POLICY if key == "A" else RUL_POLICIES[DATASETS[key]][1]
     config = RunConfig(dataset=DATASETS[key], model=rnd.model_name, swanlab_mode="offline",
-                       swanlab_workspace=None, max_output_tokens=rnd.max_output_tokens).validate()
+                       swanlab_workspace=None, max_output_tokens=rnd.max_output_tokens,
+                       evaluate_history=os.environ.get("HARNESS_EVALUATE_HISTORY") == "1").validate()
 
     workspace = Path(os.environ.get("CONTEST_WORK", "/workspace")).resolve()
     with tempfile.TemporaryDirectory(prefix=f"{key}-round-{rnd.round_index}-", dir=workspace) as directory:
@@ -293,9 +292,9 @@ def train(rnd):
             append_audit(state, root, row, ledger, measure, provenance)
             rnd.save_state(state)
 
-            result = "选择通过历史门槛且最优的候选" if chosen else "保留本轮父模型"
+            result = "选择当前批验证最优的候选" if chosen else "保留本轮父模型"
             if chosen and row.get("selected_below_target"):
-                result = "采用通过历史门槛且优于父模型的最佳未达目标候选"
+                result = "采用当前批验证优于父模型的最佳未达目标候选"
             reason = text_limit(f"{result}。{row['trainer_last_reason'] or row['trainer_reason']}（{row['stop_reason']}）")
             rnd.finish(
                 selected_artifact_id=picked,

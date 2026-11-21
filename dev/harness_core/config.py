@@ -29,10 +29,11 @@ class RunConfig:
     train_timeout: float | None = None
     max_output_tokens: int | None = None
     min_gain: float = 0.01
-    max_history_drop: float = 0.20
+    evaluate_history: bool = False
+    max_history_drop: float = 0.20  # Retained for saved options and reports.
     gas_trainer_min_validation_f1: float | None = None
     rul_min_relative_gain: float = 0.01
-    rul_max_history_increase: float = 0.50
+    rul_max_history_increase: float = 0.50  # Legacy configuration field.
     competition: bool = False
     data_dir: str = ""
     dataset: str = "gas_mlp"
@@ -62,6 +63,8 @@ class RunConfig:
                     setattr(self, field, value)
 
     def validate(self):
+        if type(self.evaluate_history) is not bool:
+            raise ValueError("evaluate_history 必须是布尔值")
         if self.scenario != "stream" or self.dataset not in {"gas_mlp", "bearing_rul", "cmapss_rul"}:
             raise ValueError("当前 Harness 只支持 gas_mlp、bearing_rul 和 cmapss_rul 的 stream 回放")
         if self.dataset in {"bearing_rul", "cmapss_rul"}:

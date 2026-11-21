@@ -13,10 +13,10 @@ from .gas_policy import (
     WINDOW_POLICY,
     WINDOW_TARGET_BATCHES,
     WINDOW_TRAINER_CONFIG,
-    WINDOW_VALIDATION_BATCHES,
 )
 from .gas_workflow import checked_path, run_trainer_batches
 from .llm_client import request_usage_known
+from .history_evaluation import HISTORY_WINDOW
 from .portability import saved_data_path
 from .storage import Ledger, RunLock, atomic_json, read_json
 from .tracking import Tracker
@@ -297,7 +297,7 @@ def run_gas_mlp(
         "max_history_drop": saved_policy.get(
             "max_history_drop", config.max_history_drop
         ),
-        "history_validation_batches": WINDOW_VALIDATION_BATCHES,
+        "history_validation_batches": HISTORY_WINDOW if config.evaluate_history else 0,
     }
     if "min_validation_macro_f1" in saved_policy or (
         saved_manifest is None and config.gas_trainer_min_validation_f1 is not None

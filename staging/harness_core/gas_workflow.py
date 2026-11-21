@@ -13,6 +13,7 @@ from baseline.gas.baselines.model import Model, checkpoint_digest
 from .gas_data import evaluate_samples, gas_samples
 from .gas_drift import detect, label_distribution
 from .gas_policy import TRAINING_ACTIONS, WINDOW_TRAINER_CONFIG
+from .history_evaluation import gas_references, gas_scores
 from .portability import resolve_model_path
 from .runner import training_window
 from .storage import atomic_json, read_json
@@ -50,8 +51,7 @@ def train_candidate(config, parent, output, train, validation, request):
             raise RuntimeError(response.stderr[-1500:])
 
 
-def candidate_gate_failures(config, macro_f1, gain, history_drop, min_validation_f1, *,
-                            max_history_drop=None, require_improvement=False):
+def candidate_gate_failures(config, macro_f1, gain, min_validation_f1, *, require_improvement=False):
     failures = []
     if min_validation_f1 is None:
         if gain <= 0 or gain + 1e-12 < config.min_gain:
@@ -61,15 +61,11 @@ def candidate_gate_failures(config, macro_f1, gain, history_drop, min_validation
             failures.append(f"当前验证 Macro-F1 未达到 {min_validation_f1:.2%}")
         if require_improvement and gain <= 1e-12:
             failures.append("当前验证 Macro-F1 未优于批初模型")
-    # 暂停历史退化门槛，历史验证结果仍写入实验记录。
-    # limit = config.max_history_drop if max_history_drop is None else max_history_drop
-    # if history_drop is not None and history_drop > limit + 1e-12:
-    #     failures.append("历史验证退化超限")
     return failures
 
 
 def evaluate_candidate(config, root, parent_model, output, request, train_rows, validation,
-                       current, history, *, min_validation_f1, max_history_drop=None, require_improvement=False,
+                       current, history, *, min_validation_f1, require_improvement=False,
                        measure_candidate=None):
     path = output / "checkpoint.npz"
     report = read_json(output / "training.json")
@@ -93,15 +89,11 @@ def evaluate_candidate(config, root, parent_model, output, request, train_rows, 
     if measure_candidate is not None:
         score = measure_candidate(output, score)
     gain = score["macro_f1"] - current["macro_f1"]
-    history_scores = []
-    for name, samples, previous in history:
-        candidate_f1 = evaluate_samples(path, samples)["macro_f1"]
-        history_scores.append({"source": name, "entry_macro_f1": previous["macro_f1"],
-                               "candidate_macro_f1": candidate_f1, "drop": previous["macro_f1"] - candidate_f1})
+    history_scores = gas_scores(path, history)
     worst = max(history_scores, key=lambda item: item["drop"], default=None)
     drop = worst["drop"] if worst else None
-    failures = candidate_gate_failures(config, score["macro_f1"], gain, drop, min_validation_f1,
-                                       max_history_drop=max_history_drop, require_improvement=require_improvement)
+    failures = candidate_gate_failures(config, score["macro_f1"], gain, min_validation_f1,
+                                       require_improvement=require_improvement)
     accepted = not failures
     candidate = {"model_path": path.relative_to(root).as_posix(), "checkpoint_sha256": digest,
                  "validation": score, "steps": model.meta["steps"], "epochs": model.meta["epochs"]}
@@ -116,7 +108,7 @@ def evaluate_candidate(config, root, parent_model, output, request, train_rows, 
 
 def run_batch_trial(config, root, ledger, tracker, batch, key, active, entry_path,
                     model, trainer_decision, train, validation, current, history, data_id,
-                    *, feedback_enabled, min_validation_f1, max_history_drop=None, training_batches=(),
+                    *, feedback_enabled, min_validation_f1, training_batches=(),
                     allow_best_below_target=False, require_improvement=False, measure_candidate=None):
     decision = ledger.get("decision", key)
     if decision is not None:
@@ -161,7 +153,7 @@ def run_batch_trial(config, root, ledger, tracker, batch, key, active, entry_pat
             raise RuntimeError("上次尝试中断且没有完整产物")
         candidate, result, accepted, gain, scores = evaluate_candidate(
             config, root, model, output, request, n_train, validation, current, history,
-            min_validation_f1=min_validation_f1, max_history_drop=max_history_drop,
+            min_validation_f1=min_validation_f1,
             require_improvement=require_improvement,
             measure_candidate=measure if measure_candidate is not None else None)
         trial.update(status="success", **result)
@@ -205,12 +197,11 @@ def rolling_drift(data, references, train, drift_config, seed, classes):
 
 
 def run_batch_search(config, root, ledger, tracker, planner, batch, entry, entry_path, model,
-                     train, validation, current, histories, data_id, context, directory,
+                     train, validation, current, historical_batches, data_id, context, directory,
                      policy, stop_after, *, min_validation_f1, data, completed, measure_candidate=None,
                      combine_candidate_training=combine_training):
     feedback_enabled = config.strategy == "llm"
     trainer_config = WINDOW_TRAINER_CONFIG
-    max_history_drop = policy.get("max_history_drop", config.max_history_drop)
     limit = policy["max_candidates_per_batch"]
     require_improvement = "validation_target_window" in policy
     history = None
@@ -263,7 +254,7 @@ def run_batch_search(config, root, ledger, tracker, planner, batch, entry, entry
             break
 
         if history is None:
-            history = [(group, rows, evaluate_samples(entry_path, rows)) for group, rows in histories]
+            history = gas_references(data, historical_batches, entry_path)
         window = training_window(batch, completed, plan["output"]["training_config"]["window_size"])
         training_batches = [data.batch_names[i] for i in window]
         candidate_train = combine_candidate_training(data, window) if len(window) > 1 else train
@@ -271,7 +262,7 @@ def run_batch_search(config, root, ledger, tracker, planner, batch, entry, entry
             config, root, ledger, tracker, batch, key, entry, entry_path, model, plan,
             candidate_train, validation, current, history, data_id,
             feedback_enabled=feedback_enabled, min_validation_f1=min_validation_f1,
-            max_history_drop=max_history_drop, training_batches=training_batches,
+            training_batches=training_batches,
             allow_best_below_target=allow_best_below_target, require_improvement=require_improvement,
             measure_candidate=measure_candidate)
         if decision is None:

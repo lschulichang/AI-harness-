@@ -56,7 +56,7 @@ def add(relative, destination=None, *, drop=(), methods=None, edits=()):
 
 
 for module in ("__init__", "storage", "portability", "feature_drift",
-               "gas_drift", "gas_metrics", "gas_training"):
+               "gas_drift", "gas_metrics", "gas_training", "history_evaluation"):
     add(f"harness_core/{module}.py")
 
 add("harness_core/runner.py", drop=("run_workflow",), edits=(
@@ -110,8 +110,10 @@ add("harness_core/gas_workflow.py", drop=("run_trainer_batches",), edits=(
     ("from .gas_data import evaluate, evaluate_samples, gas_samples", "from .gas_data import evaluate_samples, gas_samples"),
     ("from .gas_metrics import evaluate as trainer_evaluate\n", ""),
     ("from .gas_policy import (\n    TRAINING_ACTIONS,\n    WINDOW_DRIFT_BATCHES,\n"
-     "    WINDOW_TRAINER_CONFIG,\n    WINDOW_VALIDATION_BATCHES,\n    GasTrainer,\n)\n",
+     "    WINDOW_TRAINER_CONFIG,\n    GasTrainer,\n)\n",
      "from .gas_policy import TRAINING_ACTIONS, WINDOW_TRAINER_CONFIG\n"),
+    ("from .history_evaluation import gas_references, gas_scores, history_batches",
+     "from .history_evaluation import gas_references, gas_scores"),
     ("from .resource_monitor import BatchMeter\n", ""),
     ('name not in {config.api_key_env, "PYTHONPATH"}', 'name != "PYTHONPATH"'),
 ))
@@ -127,6 +129,8 @@ add("harness_core/rul_workflow.py", drop=("evaluate_public_test", "write_summary
      "from wrappers.rul_baseline import digest\n"),
     ("from .rul_policy import LIMITS, TRAINING_ACTIONS, RulTrainer, training_defaults",
      "from .rul_policy import LIMITS, TRAINING_ACTIONS, training_defaults"),
+    ("from .history_evaluation import HISTORY_WINDOW, history_batches, rul_references, rul_scores",
+     "from .history_evaluation import history_batches, rul_references, rul_scores"),
     ("from .config import project_root\n", ""),
     ("from .llm_client import request_usage_known\n", ""),
     ("from .portability import resolve_model_path, saved_data_path", "from .portability import resolve_model_path"),
